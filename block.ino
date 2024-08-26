@@ -6,32 +6,20 @@
 #include <ArduinoJson.h>
 #include <ArduinoOTA.h>
 #include <ESP8266mDNS.h>
-//#include <WiFi.h>
-//#include <WebServer.h>
 
 /****************PIN Definitionz************/
 
 #define TRIGGER 2
 #define ECHO 4
-#define LEVEL_SENSOR 34
+
 /******************GLOBAL VARIABLES AND CONSTANTS ************/
-int intPortValue=0;
-float floatLevelVolts=0.0;
-float floatLevelCm=0.0;
-float floatCapacityCm=0.0;
-int intLevelPercent=0;
-
-const float floatCmPerVolt=200/2.4;
-const int intTankRadiusCm=55;
-
-
 int intDistance;
 int intTime;
 int intVolume=0;
 int intFull=30;
 int intEmpty=120;
 int intCapacity=0;
-//int intTankRadiusCm=50;
+int intTankRadiusCm=50;
 int intLevelCm=0;
 int intLevel=0;
 float floatLitersPerCm=0.0;
@@ -92,7 +80,7 @@ void setup() {
   float floatLitersPerCm=PI*(intTankRadiusCm*intTankRadiusCm)/1000;
   int intCapacity=intEmpty-intFull;
   Serial.begin(SerialSpeed);
-  Serial.setTimeout(timeoutTime);
+ // pinMode(output4, OUTPUT);
   Serial.print("Capacity: "); Serial.print(intCapacity);
   Serial.print("Speed of sound Cm per uS: "); Serial.print(floatSpeedOfSoundCMPMS);
   Serial.print("Liters per cm: "); Serial.print(floatLitersPerCm);
@@ -110,16 +98,16 @@ void setup() {
 
   Serial.print("\nJOffre ");
   server.on("/", handle_OnConnect);
-  server.on("/tankStatus", getTankStatus);
   server.on("/ledon", handle_ledon);
   server.on("/ledoff", handle_ledoff);
   server.onNotFound(handle_NotFound);
-
+  server.on("/tankStatus", getTankStatus);
   server.begin();
 
 
 //nuevo
 
+ //  Serial.begin(115200);
   // Initialize the output variables as outputs
   pinMode(output5, OUTPUT);
   pinMode(output4, OUTPUT);
@@ -147,31 +135,9 @@ void setup() {
   Serial.println(WiFi.localIP());
   server.begin();
 
-
-  Serial.println("I'm awake, but I'm going into deep sleep mode for 5 minutes");
-  ESP.deepSleep(1500e6); 
-
 }
 
 void loop() {
-/*RANGE 0.6V - 3.0V : 12 Bits 0 -4095 : 0 - 2 M*/
-intPortValue = analogRead(LEVEL_SENSOR);
-Serial.println("----------------");
-Serial.print("intPortValue: ");Serial.println(intPortValue);
-floatLevelVolts =((intPortValue*3.3)/4095) -0.6;
-if(floatLevelVolts < 0.0)
-  floatLevelVolts = 0;
-Serial.print("floatLevelVolts: ");Serial.println(floatLevelVolts);
-floatLevelCm = floatLevelVolts * floatCmPerVolt;
-Serial.print("floatLevelCm: ");Serial.println(floatLevelCm);
-
-Serial.print("Nivel en cm: ");Serial.println(floatLevelCm);
-
-intLevelPercent = (floatLevelCm/floatCapacityCm) *100;
-Serial.print("Nivel: ");Serial.print(intLevelPercent);Serial.println("%");
-
-intVolume=floatLevelCm*floatLitersPerCm;
-Serial.print("Volume: ");Serial.println(intVolume);
 
 
    /**CHECK DISTANCE***/
@@ -182,9 +148,9 @@ Serial.print("Volume: ");Serial.println(intVolume);
   intTime=pulseIn(ECHO, HIGH);
   intTime=intTime/2;
   intDistance=intTime*floatSpeedOfSoundCMPMS;
-  Serial.print("/n Distance: "); Serial.print(intDistance);
-if(floatLevelVolts !=0){
- /*     intLevelCm = intEmpty - intDistance;
+  Serial.print("Distance: "); Serial.print(intDistance);
+  if(intDistance !=0){
+    intLevelCm = intEmpty - intDistance;
   if(intLevelCm < 0)
     intLevelCm = 0;
   if(intLevelCm > intCapacity)
@@ -195,13 +161,13 @@ if(floatLevelVolts !=0){
   Serial.print("Nivel: "); Serial.print(intLevel); Serial.print("%");
   intVolume=intLevelCm*floatLitersPerCm;
   Serial.print("Volume: "); Serial.print(intVolume);
-*/
+
   }
   else { // When intDistance is 0 is a sensor error or disconnected
   
    intLevel=-1;
    intVolume=-1;
- 
+  
 
   }
   /****CHECK WIFI CONNECTION AND CHECK WEBSERVER ***/
@@ -228,7 +194,7 @@ if(floatLevelVolts !=0){
 
 
 
- WiFiClient wificlient = server.client();   // Listen for incoming clients
+ WiFiClient wificlient = serverx.available();   // Listen for incoming clients
 
   if (wificlient) {                             // If a new client connects,
     Serial.println("New Client.");          // print a message out in the serial port
@@ -335,9 +301,8 @@ if(floatLevelVolts !=0){
    jsonDocument.clear();
    jsonDocument["level"] = intLevel;
    jsonDocument["volume"] = intVolume;
-   jsonDocument["WaterColumn"] = floatLevelCm;
    serializeJson(jsonDocument,bufferJson);
-   server.send(200,"application/json", bufferJson);
+   //server.send(200,"application/json", bufferJson);
 
 
 
@@ -383,11 +348,8 @@ String updateWebpage(uint8_t LEDstatus){
   ptr +="</head>\n";
   ptr +="<body>\n";
   ptr +="<h1>ESP8266 Web Server</h1>\n";
-  ptr +="<h3>CODER PATH JOFFRE HERMOSILLA SALAS [DEVELOPER] </h3><img src='https://raw.githubusercontent.com/Hackathon-ChatGPT-NTTDATA/eurekaserver/master/src/main/resources/fotocreador/spring-logo-eureka.png' alt='CODER PATH' /> \n";
-  ptr +="<h1> </h1>\n";
-  ptr +="<a href='http://192.168.1.184/tankStatus'>TANQUE DE AGUA</a>\n";
-  ptr +="<h1> </h1>\n";
-  ptr +="<a href='/tankStatus'>Dos botones</a>\n";
+  ptr +="<h3>Using Station(STA) Mode</h3>\n";
+  
    if(LEDstatus){
     ptr +="<p>BLUE LED: ON</p><a class=\"button button-off\" href=\"/ledoff\">OFF</a>\n";
    }else{
@@ -398,7 +360,6 @@ String updateWebpage(uint8_t LEDstatus){
   ptr +="</html>\n";
   return ptr;
 }
-
 
 
 
