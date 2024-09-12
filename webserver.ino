@@ -1,3 +1,9 @@
+// Using ESP8266
+// using library DHT sensor Library by Adafruit Version 1.4.3
+// This program for send temp, humidity to mqtt broker
+// Receive message from mqtt broker to turn on device
+// Reference GPIO  https://randomnerdtutorials.com/esp8266-pinout-reference-gpios/
+
 /*********************LIBRARY***************/
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
@@ -17,8 +23,8 @@
 
 #include <WhatabotAPIClient.h>
 #include <WiFiManager.h>
-
-
+// Library for MQTT:
+#include <PubSubClient.h>
 /****************what bot **********/
 
 #define WHATABOT_API_KEY ""
@@ -26,19 +32,16 @@
 #define WHATABOT_PLATFORM "whatsapp"
 WiFiManager wifiManager;
 WhatabotAPIClient whatabotClient(WHATABOT_API_KEY, WHATABOT_CHAT_ID, WHATABOT_PLATFORM);
-#define AP_SSID ""
+#define AP_SSID " "
 #define AP_PASS ""
 /****************PIN Definitionz************/
-
-
-
 
 #define TRIGGER 2
 #define ECHO 4
 #define LEVEL_SENSOR 34
 
 /****************Mail************/
-const char *user_base64 = "";
+const char *user_base64 = "joffre.hermosilla@gmail.com";
 const char *user_password_base64 = "";
 const char *from_email = "MAIL From: <joffre.hermosilla@gmail.com>";
 const char *to_email = "RCPT TO: <alucardaywalker@hotmail.com>";
@@ -63,6 +66,37 @@ byte eRcv(WiFiClientSecure client);
 /* Declare the global used SMTPSession object for SMTP transport */
 SMTPSession smtp;
 
+// Setup for DHT======================================
+#include <DHT.h>
+#define DHTPIN 2 // GPIO2 atau D4
+// Uncomment the type of sensor in use:
+// #define DHTTYPE    DHT11     // DHT 11
+#define DHTTYPE DHT11 // DHT 22 (AM2302)
+// #define DHTTYPE    DHT21     // DHT 21 (AM2301)
+DHT dht(DHTPIN, DHTTYPE);
+
+// current temperature & humidity, updated in loop()
+float t = 0.0;
+float h = 0.0;
+
+// declare topic for publish message
+const char *topic_pub = "ESP_Pub";
+// declare topic for subscribe message
+const char *topic_sub = "ESP_Sub";
+
+// Update these with values suitable for your network.
+
+const char *mqtt_server = "103.227.130.104";
+
+// for output
+int lamp1 = 16; // lamp for mqtt connected D0
+int lamp2 = 5;  // lamp for start indicator D1
+int lamp3 = 4;  // lamp for stop indicator D2
+
+WiFiClient espClient;
+PubSubClient client(espClient);
+// char msg[50];
+
 /* Callback function to get the Email sending status */
 void smtpCallback(SMTP_Status status);
 
@@ -70,21 +104,20 @@ void smtpCallback(SMTP_Status status);
 WiFiClient wifiClient;
 HTTPClient http;
 // COLOCAMOS EL TOKEN QUE NOS ENTREGA META
-String token = "Bearer "
+String token = "Bearer ";
+
 // COLOCAMOS LA URL A DONDE SE ENVIAN LOS MENSAJES DE WHATSAPP
 String servidor = "https://graph.facebook.com/v20.0//messages";
 // CREAMOS UNA JSON DONDE SE COLOCA EL NUMERO DE TELEFONO Y EL MENSAJE
-String payload = "{ \"messaging_product\": \"whatsapp\", \"to\": \"51989168761\", \"type\": \"template\", \"template\": { \"name\": \"hello_world\", \"language\": { \"code\": \"en_US\" } } }";
+String payload = "{ \"messaging_product\": \"whatsapp\", \"to\": \"\", \"type\": \"template\", \"template\": { \"name\": \"hello_world\", \"language\": { \"code\": \"en_US\" } } }";
 // PIN DEL SENSOR DE MOVIMIENTO
 const int pinSensorMov = 15;
 // ESTADO DEL SENSOR
 int estadoActual = LOW;
 
-
 // whatbot //
 String phoneNumber = "";
-String apiKey = "";
-
+String apiKey = "---";
 
 /******************GLOBAL VARIABLES AND CONSTANTS ************/
 int intPortValue = 0;
@@ -108,7 +141,7 @@ int intLevel = 0;
 float floatLitersPerCm = 0.0;
 float floatSpeedOfSoundCMPMS = 0.0;
 
-const char *ssid = "MILAGRITOS SALAS";
+const char *ssid = " ";
 const char *password = "";
 
 const int SerialSpeed = 115200;
@@ -150,25 +183,26 @@ const long timeoutTime = 2000;
 
 bool LEDstatus = LOW;
 
-
-
- void sendMessage(String message){
+void sendMessage(String message)
+{
 
   // Data to send with HTTP POST
   String url = "http://api.callmebot.com/whatsapp.php?phone=" + phoneNumber + "&apikey=" + apiKey + "&text=" + urlEncode(message);
-  WiFiClient client;    
+  WiFiClient client;
   HTTPClient http;
   http.begin(client, url);
 
   // Specify content-type header
   http.addHeader("Content-Type", "application/x-www-form-urlencoded");
-  
+
   // Send HTTP POST request
   int httpResponseCode = http.POST(url);
-  if (httpResponseCode == 200){
+  if (httpResponseCode == 200)
+  {
     Serial.print("Message sent successfully");
   }
-  else{
+  else
+  {
     Serial.println("Error sending the message");
     Serial.print("HTTP response code: ");
     Serial.println(httpResponseCode);
@@ -178,13 +212,10 @@ bool LEDstatus = LOW;
   http.end();
 }
 
-
-
-
 void setup()
 {
-  wifiManager.autoConnect(AP_SSID, AP_PASS);
-
+  //  wifiManager.autoConnect(AP_SSID, AP_PASS);
+  wifiManager.autoConnect(ssid, password);
   // put your setup code here, to run once:
   float SpeedOfSoundsMPS;
   float floatSpeedOfSoundCMPMS = SpeedOfSoundsMPS * 100 / 1000000;
@@ -237,7 +268,7 @@ void setup()
   Serial.print("Connecting to ");
   // Serial.println(ssid);
   WiFi.begin(ssid, password);
- 
+
   while (WiFi.status() != WL_CONNECTED)
   {
     delay(500);
@@ -250,10 +281,36 @@ void setup()
   Serial.println(WiFi.localIP());
   server.begin();
 
-  Serial.println("I'm awake, but I'm going into deep sleep mode for 5 minutes");
-   // ESP.deepSleep(1500e6);
+  // DEEP SLEEP
 
-   // MAIL CON SMTP //
+  Serial.println("I'm awake, but I'm going into deep sleep mode for 5 minutes");
+  // ESP.deepSleep(1500e6);
+
+  /* get the wakeup reason
+  ESP_SleepWakeupCause wakeupReason = ESP.getWakeupReason();
+  switch (wakeupReason)
+  {
+  case ESP_SLEEP_WAKEUP_TIMER:
+    Serial.println("Wakeup caused by timer");
+    break;
+  case ESP_SLEEP_WAKEUP_EXT0:
+    Serial.println("Wakeup caused by external signal using RTC_IO");
+    break;
+  case ESP_SLEEP_WAKEUP_EXT1:
+    Serial.println("Wakeup caused by external signal using RTC_CNTL");
+    break;
+  case ESP_SLEEP_WAKEUP_TOUCHPAD:
+    Serial.println("Wakeup caused by touchpad");
+    break;
+  case ESP_SLEEP_WAKEUP_ULP:
+    Serial.println("Wakeup caused by ULP program");
+    break;
+  default:
+    Serial.println("Wakeup was not caused by deep sleep");
+    break;
+  } */
+
+  // MAIL CON SMTP //
   // gmail_configuration();
 
   // Send Message to WhatsAPP by whatbot
@@ -262,17 +319,122 @@ void setup()
   // whatbot //
 
   whatabotClient.begin();
-  whatabotClient.onMessageReceived(onMessageReceived); 
+  whatabotClient.onMessageReceived(onMessageReceived);
   whatabotClient.onServerResponseReceived(onServerResponseReceived);
-  
+
+  // GMAIL SMPT ///
+
+  Serial.println();
+  Serial.print("Connected with IP: ");
+  Serial.println(WiFi.localIP());
+  Serial.println();
+
+  /*  Set the network reconnection option */
+  MailClient.networkReconnect(true);
+
+  /** Enable the debug via Serial port
+   * 0 for no debugging
+   * 1 for basic level debugging
+   *
+   * Debug port can be changed via ESP_MAIL_DEFAULT_DEBUG_PORT in ESP_Mail_FS.h
+   */
+  smtp.debug(1);
+
+  /* Set the callback function to get the sending results */
+  smtp.callback(smtpCallback);
+
+  /* Declare the Session_Config for user defined session credentials */
+  Session_Config config;
+
+  /* Set the session config */
+  config.server.host_name = SMTP_HOST;
+  config.server.port = SMTP_PORT;
+  config.login.email = AUTHOR_EMAIL;
+  config.login.password = AUTHOR_PASSWORD;
+  config.login.user_domain = "";
+
+  /*
+  Set the NTP config time
+  For times east of the Prime Meridian use 0-12
+  For times west of the Prime Meridian add 12 to the offset.
+  Ex. American/Denver GMT would be -6. 6 + 12 = 18
+  See https://en.wikipedia.org/wiki/Time_zone for a list of the GMT/UTC timezone offsets
+  */
+  config.time.ntp_server = F("pool.ntp.org,time.nist.gov");
+  config.time.gmt_offset = 3;
+  config.time.day_light_offset = 0;
+
+  /* Declare the message class */
+  SMTP_Message message;
+
+  /* Set the message headers */
+  message.sender.name = F("ESP8266 - CODER PATH");
+  message.sender.email = AUTHOR_EMAIL;
+  message.subject = F("ESP8266 Test Email enviado desde ESP8266");
+  message.addRecipient(F("Joffre"), RECIPIENT_EMAIL);
+
+  /*Send HTML message*/
+  /*String htmlMsg = "<div style=\"color:#2f4468;\"><h1>Hello World!</h1><p>- Sent from ESP board</p></div>";
+  message.html.content = htmlMsg.c_str();
+  message.html.content = htmlMsg.c_str();
+  message.text.charSet = "us-ascii";
+  message.html.transfer_encoding = Content_Transfer_Encoding::enc_7bit;*/
+
+  // Send raw text message
+  String textMsg = "Hello World! - Mensaje enviado desde el microcontrolador esp8266 - lo lograste!!!";
+  message.text.content = textMsg.c_str();
+  message.text.charSet = "us-ascii";
+  message.text.transfer_encoding = Content_Transfer_Encoding::enc_7bit;
+
+  message.priority = esp_mail_smtp_priority::esp_mail_smtp_priority_low;
+  message.response.notify = esp_mail_smtp_notify_success | esp_mail_smtp_notify_failure | esp_mail_smtp_notify_delay;
+
+  /* Connect to the server */
+  if (!smtp.connect(&config))
+  {
+    ESP_MAIL_PRINTF("Connection error, Status Code: %d, Error Code: %d, Reason: %s", smtp.statusCode(), smtp.errorCode(), smtp.errorReason().c_str());
+    return;
+  }
+
+  if (!smtp.isLoggedIn())
+  {
+    Serial.println("\nNot yet logged in.");
+  }
+  else
+  {
+    if (smtp.isAuthenticated())
+      Serial.println("\nSuccessfully logged in.");
+    else
+      Serial.println("\nConnected with no Auth.");
+  }
+
+  /* Start sending Email and close the session */
+  if (!MailClient.sendMail(&smtp, &message))
+    ESP_MAIL_PRINTF("Error, Status Code: %d, Error Code: %d, Reason: %s", smtp.statusCode(), smtp.errorCode(), smtp.errorReason().c_str());
+
+  /// MQTT //
+  dht.begin();
+  setup_wifi();
+  client.setServer(mqtt_server, 1883);
+  client.setCallback(callback);
+  // subscribe topic
+  client.subscribe(topic_sub);
+  // setup pin output
+  pinMode(lamp1, OUTPUT);
+  pinMode(lamp2, OUTPUT);
+  pinMode(lamp3, OUTPUT);
+  // Reset lamp, turn off all Relay
+  digitalWrite(lamp1, HIGH);
+  digitalWrite(lamp2, HIGH);
+  digitalWrite(lamp3, HIGH);
 }
 
 void loop()
 {
-  //what bot
- whatabotClient.loop(); 
+  // what bot
+  whatabotClient.loop();
 
- //tank status
+  // tank status
 
   /*RANGE 0.6V - 3.0V : 12 Bits 0 -4095 : 0 - 2 M*/
   intPortValue = analogRead(LEVEL_SENSOR);
@@ -527,6 +689,21 @@ void loop()
 
   Serial.print("Email número: ");
   Serial.println(contMail);
+
+  // MQTT //
+  if (!client.connected())
+  {
+    reconnect();
+  }
+  client.loop();
+
+  // read DHT sensor, temp and humidity-------------------------------
+  t = dht.readTemperature();
+  h = dht.readHumidity();
+  if ((isnan(t)) || (isnan(h)))
+  {
+    Serial.println("Failed to read from DHT sensor!");
+  }
 }
 
 void getTankStatus()
@@ -572,7 +749,7 @@ String updateWebpage(uint8_t LEDstatus)
 {
   String ptr = "<!DOCTYPE html> <html>\n";
   ptr += "<head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0, user-scalable=no\">\n";
-  ptr += "<title>LED Control</title>\n";
+  ptr += "<title>CODER PATH ESP8266 PLATFORM</title>\n";
   ptr += "<link rel='shortcut icon' href='https://avatars.githubusercontent.com/u/145310760?s=400&u=a8d4e2b367b3d851668f549621cec1c9aec5193b&v=4' />\n";
   ptr += "<style>html {font-family: Helvetica; display: inline-block; margin: 0px auto; text-align: center;}\n";
   ptr += "body{margin-top: 50px;} h1 {color: #444444;margin: 50px auto 30px;} h3 {color: #444444;margin-bottom: 50px;}\n";
@@ -732,7 +909,6 @@ void smtpCallback(SMTP_Status status)
   }
 }
 
-
 void gmail_configuration()
 {
 
@@ -779,7 +955,7 @@ void gmail_configuration()
   message.sender.email = AUTHOR_EMAIL;
   message.subject = F("ESP Test Email");
   message.addRecipient(F("Sara"), RECIPIENT_EMAIL);
-    
+
   /*Send HTML message*/
   /*String htmlMsg = "<div style=\"color:#2f4468;\"><h1>Hello World!</h1><p>- Sent from ESP board</p></div>";
   message.html.content = htmlMsg.c_str();
@@ -787,27 +963,28 @@ void gmail_configuration()
   message.text.charSet = "us-ascii";
   message.html.transfer_encoding = Content_Transfer_Encoding::enc_7bit;*/
 
-   
-  //Send raw text message
+  // Send raw text message
   String textMsg = "Hello World! - Sent from ESP board";
   message.text.content = textMsg.c_str();
   message.text.charSet = "us-ascii";
   message.text.transfer_encoding = Content_Transfer_Encoding::enc_7bit;
-  
+
   message.priority = esp_mail_smtp_priority::esp_mail_smtp_priority_low;
   message.response.notify = esp_mail_smtp_notify_success | esp_mail_smtp_notify_failure | esp_mail_smtp_notify_delay;
 
-
   /* Connect to the server */
-  if (!smtp.connect(&config)){
+  if (!smtp.connect(&config))
+  {
     ESP_MAIL_PRINTF("Connection error, Status Code: %d, Error Code: %d, Reason: %s", smtp.statusCode(), smtp.errorCode(), smtp.errorReason().c_str());
     return;
   }
 
-  if (!smtp.isLoggedIn()){
+  if (!smtp.isLoggedIn())
+  {
     Serial.println("\nNot yet logged in.");
   }
-  else{
+  else
+  {
     if (smtp.isAuthenticated())
       Serial.println("\nSuccessfully logged in.");
     else
@@ -817,33 +994,245 @@ void gmail_configuration()
   /* Start sending Email and close the session */
   if (!MailClient.sendMail(&smtp, &message))
     ESP_MAIL_PRINTF("Error, Status Code: %d, Error Code: %d, Reason: %s", smtp.statusCode(), smtp.errorCode(), smtp.errorReason().c_str());
-
 }
 
-
-void onServerResponseReceived(String message) {
-  Serial.println(message); 
+void onServerResponseReceived(String message)
+{
+  Serial.println(message);
 }
 
-void onMessageReceived(String message) {
+void onMessageReceived(String message)
+{
   message.toUpperCase();
   Serial.println(message);
 
-  if (message.equals("START")) {
+  if (message.equals("START"))
+  {
     whatabotClient.sendMessageWS("Starting");
     // Add your logic for starting here
-  } else if (message.equals("STOP")) {
+  }
+  else if (message.equals("STOP"))
+  {
     whatabotClient.sendMessageWS("Stopping");
     // Add your logic for stopping here
-  } else if (message.equals("PAUSE")) {
+  }
+  else if (message.equals("PAUSE"))
+  {
     whatabotClient.sendMessageWS("Pausing");
     // Add your logic for pausing here
-  } else if (message.equals("RESUME")) {
+  }
+  else if (message.equals("RESUME"))
+  {
     whatabotClient.sendMessageWS("Resumming");
     // Add your logic for resuming here
-  } else {
+  }
+  else
+  {
     whatabotClient.sendMessageWS("Unknown command");
     // Handle unknown commands here (optional)
   }
-  
+}
+
+void setup_wifi()
+{
+  delay(100);
+  // We start by connecting to a WiFi network
+  Serial.print("Connecting to ");
+  Serial.println(ssid);
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED)
+  {
+    delay(500);
+    Serial.print(".");
+  }
+  randomSeed(micros());
+  Serial.println("");
+  Serial.println("WiFi connected");
+  Serial.println("IP address: ");
+  Serial.println(WiFi.localIP());
+}
+
+void callback(char *topic, byte *payload, unsigned int length)
+{
+  // Receiving message as subscriber
+  Serial.print("Message arrived in topic: ");
+  Serial.println(topic);
+  String json_received;
+  Serial.print("JSON Received:");
+  for (int i = 0; i < length; i++)
+  {
+    json_received += ((char)payload[i]);
+    // Serial.print((char)payload[i]);
+  }
+  Serial.println(json_received);
+  // if receive ask status from node-red, send current status of lamps
+  if (json_received == "Status")
+  {
+    check_stat();
+  }
+  else
+  {
+    // Parse json
+    // StaticJsonBuffer<200> jsonBuffer;  //arudion json v5
+    // JsonObject& root = jsonBuffer.parseObject(json_received);
+
+    JsonDocument doc;
+    // JsonObject& JSONencoder = JSONbuffer.createObject();
+    JsonObject root = doc.to<JsonObject>();
+
+    // get json parsed value
+    // sample of json: {"device":"Lamp1","trigger":"on"}
+    Serial.print("Command:");
+    String device = root["device"];
+    String trigger = root["trigger"];
+    Serial.println("Turn " + trigger + " " + device);
+    Serial.println("-----------------------");
+    // Trigger device
+    // Lamp1***************************
+    if (device == "Lamp1")
+    {
+      if (trigger == "on")
+      {
+        digitalWrite(lamp1, LOW);
+      }
+      else
+      {
+        digitalWrite(lamp1, HIGH);
+      }
+    }
+    // Lamp2***************************
+    if (device == "Lamp2")
+    {
+      if (trigger == "on")
+      {
+        digitalWrite(lamp2, LOW);
+      }
+      else
+      {
+        digitalWrite(lamp2, HIGH);
+      }
+    }
+    // Lamp3***************************
+    if (device == "Lamp3")
+    {
+      if (trigger == "on")
+      {
+        digitalWrite(lamp3, LOW);
+      }
+      else
+      {
+        digitalWrite(lamp3, HIGH);
+      }
+    }
+    // All***************************
+    if (device == "All")
+    {
+      if (trigger == "on")
+      {
+        digitalWrite(lamp1, LOW);
+        digitalWrite(lamp2, LOW);
+        digitalWrite(lamp3, LOW);
+      }
+      else
+      {
+        digitalWrite(lamp1, HIGH);
+        digitalWrite(lamp2, HIGH);
+        digitalWrite(lamp3, HIGH);
+      }
+    }
+    check_stat();
+  }
+}
+
+void reconnect()
+{
+  // Loop until we're reconnected
+  while (!client.connected())
+  {
+    Serial.print("Attempting MQTT connection...");
+    // Create a random client ID
+    String clientId = "ESP8266Client-";
+    clientId += String(random(0xffff), HEX);
+    // Attempt to connect
+    // if you MQTT broker has clientID,username and password
+    // please change following line to    if (client.connect(clientId,userName,passWord))
+    if (client.connect(clientId.c_str()))
+    {
+      Serial.println("connected");
+      // once connected to MQTT broker, subscribe command if any
+      client.subscribe(topic_sub);
+      check_stat();
+    }
+    else
+    {
+      Serial.print("failed, rc=");
+      Serial.print(client.state());
+      Serial.println(" try again in 5 seconds");
+      // Wait 5 seconds before retrying
+      delay(5000);
+    }
+  }
+}
+
+void check_stat()
+{
+  // check output status--------------------------------------------
+  // This function will update lamp status to mqtt
+  // StaticJsonBuffer<300> JSONbuffer; //arudion json v5
+  JsonDocument doc;
+  // JsonObject& JSONencoder = JSONbuffer.createObject();
+  JsonObject JSONencoder = doc.to<JsonObject>();
+
+  bool stat_lamp1 = digitalRead(lamp1);
+  bool stat_lamp2 = digitalRead(lamp2);
+  bool stat_lamp3 = digitalRead(lamp3);
+  // lamp1==========================
+  if (stat_lamp1 == false)
+  {
+    JSONencoder["lamp1"] = true;
+  }
+  else
+  {
+    JSONencoder["lamp1"] = false;
+  }
+  // lamp2==========================
+  if (stat_lamp2 == false)
+  {
+    JSONencoder["lamp2"] = true;
+  }
+  else
+  {
+    JSONencoder["lamp2"] = false;
+  }
+  // lamp3==========================
+  if (stat_lamp3 == false)
+  {
+    JSONencoder["lamp3"] = true;
+  }
+  else
+  {
+    JSONencoder["lamp3"] = false;
+  }
+
+  JSONencoder["device"] = "ESP8266";
+  JSONencoder["temperature"] = t;
+  JSONencoder["humidity"] = h;
+
+  char JSONmessageBuffer[100];
+  // JSONencoder.printTo(JSONmessageBuffer, sizeof(JSONmessageBuffer));// arduion json v5
+  // serializeJson(JSONmessageBuffer);
+
+  Serial.println("Sending message to MQTT topic..");
+  Serial.println(JSONmessageBuffer);
+  // JSONencoder.printTo(JSONmessageBuffer, sizeof(JSONmessageBuffer));
+  // serializeJson(JSONmessageBuffer);
+  if (client.publish(topic_pub, JSONmessageBuffer) == true)
+  {
+    Serial.println("Success sending message");
+  }
+  else
+  {
+    Serial.println("Error sending message");
+  }
+  Serial.println("-------------");
 }
