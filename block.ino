@@ -27,13 +27,13 @@
 #include <PubSubClient.h>
 /****************what bot **********/
 
-#define WHATABOT_API_KEY ""
-#define WHATABOT_CHAT_ID ""
+#define WHATABOT_API_KEY "37fee9bc-ffc4-4ac9-964a"
+#define WHATABOT_CHAT_ID "51989168761"
 #define WHATABOT_PLATFORM "whatsapp"
 WiFiManager wifiManager;
 WhatabotAPIClient whatabotClient(WHATABOT_API_KEY, WHATABOT_CHAT_ID, WHATABOT_PLATFORM);
-#define AP_SSID " "
-#define AP_PASS ""
+#define AP_SSID "MILAGRITOS SALAS"
+#define AP_PASS "alisito2023"
 /****************PIN Definitionz************/
 
 #define TRIGGER 2
@@ -42,7 +42,7 @@ WhatabotAPIClient whatabotClient(WHATABOT_API_KEY, WHATABOT_CHAT_ID, WHATABOT_PL
 
 /****************Mail************/
 const char *user_base64 = "joffre.hermosilla@gmail.com";
-const char *user_password_base64 = "";
+const char *user_password_base64 = "1983joffre";
 const char *from_email = "MAIL From: <joffre.hermosilla@gmail.com>";
 const char *to_email = "RCPT TO: <alucardaywalker@hotmail.com>";
 uint32_t TIEMPO_DeepSleep = 90e6;
@@ -58,7 +58,7 @@ byte eRcv(WiFiClientSecure client);
 
 /* The sign in credentials */
 #define AUTHOR_EMAIL "joffre.hermosilla@gmail.com"
-#define AUTHOR_PASSWORD ""
+#define AUTHOR_PASSWORD "jtmn khfe nldj gsgp"
 
 /* Recipient's email*/
 #define RECIPIENT_EMAIL "alucardaywalker@hotmail.com"
@@ -86,9 +86,9 @@ const char *topic_sub = "ESP_Sub";
 
 // Update these with values suitable for your network.
 
-const char *mqtt_server = "103.227.130.104";
-
-// for output
+const char *mqtt_server = "broker.mqtt-dashboard.com";
+// const char *mqtt_server = "2001:41d0:1:925e::1";
+//  for output
 int lamp1 = 16; // lamp for mqtt connected D0
 int lamp2 = 5;  // lamp for start indicator D1
 int lamp3 = 4;  // lamp for stop indicator D2
@@ -104,20 +104,20 @@ void smtpCallback(SMTP_Status status);
 WiFiClient wifiClient;
 HTTPClient http;
 // COLOCAMOS EL TOKEN QUE NOS ENTREGA META
-String token = "Bearer ";
+String token = "Bearer EAAPIgr6P6AABO8pZBKOb1RQZClIcmMMi9Q0S2mb5sFmtrLbSVirYV3aslDwUBeSzWQZB5rafBXFKf1XWFUBZBNRmrgQ3HgBv247X5L8l9PAhcT3217ZBNFWGTTT94hDVLGSpzQcMCw8oIIeTw88euwHLAfwCHSR348j6O1dpQ8wqSXcGZB7SuQCJ3vSkaZCj2l0";
 
 // COLOCAMOS LA URL A DONDE SE ENVIAN LOS MENSAJES DE WHATSAPP
-String servidor = "https://graph.facebook.com/v20.0//messages";
+String servidor = "https://graph.facebook.com/v20.0/432760356580137/messages";
 // CREAMOS UNA JSON DONDE SE COLOCA EL NUMERO DE TELEFONO Y EL MENSAJE
-String payload = "{ \"messaging_product\": \"whatsapp\", \"to\": \"\", \"type\": \"template\", \"template\": { \"name\": \"hello_world\", \"language\": { \"code\": \"en_US\" } } }";
+String payload = "{ \"messaging_product\": \"whatsapp\", \"to\": \"51989168761\", \"type\": \"template\", \"template\": { \"name\": \"hello_world\", \"language\": { \"code\": \"en_US\" } } }";
 // PIN DEL SENSOR DE MOVIMIENTO
 const int pinSensorMov = 15;
 // ESTADO DEL SENSOR
 int estadoActual = LOW;
 
 // whatbot //
-String phoneNumber = "";
-String apiKey = "---";
+String phoneNumber = "51989168761";
+String apiKey = "37fee9bc-ffc4-4ac9-964a";
 
 /******************GLOBAL VARIABLES AND CONSTANTS ************/
 int intPortValue = 0;
@@ -141,8 +141,8 @@ int intLevel = 0;
 float floatLitersPerCm = 0.0;
 float floatSpeedOfSoundCMPMS = 0.0;
 
-const char *ssid = " ";
-const char *password = "";
+const char *ssid = "MILAGRITOS SALAS";
+const char *password = "alisito2023";
 
 const int SerialSpeed = 115200;
 const int tempAvg = 20;
@@ -182,6 +182,13 @@ const long timeoutTime = 2000;
 // https://github.com/binaryupdates/NodeMCU-Webserver-Station-Mode/blob/main/ESP8266_Webserver_Station_Mode.ino#L10C3-L10C22
 
 bool LEDstatus = LOW;
+
+// MQTT
+
+unsigned long lastMsg = 0;
+#define MSG_BUFFER_SIZE (50)
+char msg[MSG_BUFFER_SIZE];
+int value = 0;
 
 void sendMessage(String message)
 {
@@ -427,6 +434,10 @@ void setup()
   digitalWrite(lamp1, HIGH);
   digitalWrite(lamp2, HIGH);
   digitalWrite(lamp3, HIGH);
+
+  // MQTT
+  pinMode(BUILTIN_LED, OUTPUT); // Initialize the BUILTIN_LED pin as an output
+  //  client.setCallback(callback_mqtt(char *topic, byte *payload, unsigned int length));
 }
 
 void loop()
@@ -704,535 +715,632 @@ void loop()
   {
     Serial.println("Failed to read from DHT sensor!");
   }
-}
 
-void getTankStatus()
-{
+  // MQTT
 
-  Serial.print("Get tank status");
-  Serial.print("Get tank status");
-  jsonDocument.clear();
-  jsonDocument["level"] = intLevel;
-  jsonDocument["volume"] = intVolume;
-  jsonDocument["WaterColumn"] = floatLevelCm;
-  serializeJson(jsonDocument, bufferJson);
-  server.send(200, "application/json", bufferJson);
-}
-
-void handle_OnConnect()
-{
-  LEDstatus = LOW;
-  Serial.println("LED: OFF");
-  server.send(200, "text/html", updateWebpage(LEDstatus));
-}
-
-void handle_ledon()
-{
-  LEDstatus = HIGH;
-  Serial.println("LED: ON");
-  server.send(200, "text/html", updateWebpage(LEDstatus));
-}
-
-void handle_ledoff()
-{
-  LEDstatus = LOW;
-  Serial.println("LED: OFF");
-  server.send(200, "text/html", updateWebpage(LEDstatus));
-}
-
-void handle_NotFound()
-{
-  server.send(404, "text/plain", "Not found");
-}
-
-String updateWebpage(uint8_t LEDstatus)
-{
-  String ptr = "<!DOCTYPE html> <html>\n";
-  ptr += "<head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0, user-scalable=no\">\n";
-  ptr += "<title>CODER PATH ESP8266 PLATFORM</title>\n";
-  ptr += "<link rel='shortcut icon' href='https://avatars.githubusercontent.com/u/145310760?s=400&u=a8d4e2b367b3d851668f549621cec1c9aec5193b&v=4' />\n";
-  ptr += "<style>html {font-family: Helvetica; display: inline-block; margin: 0px auto; text-align: center;}\n";
-  ptr += "body{margin-top: 50px;} h1 {color: #444444;margin: 50px auto 30px;} h3 {color: #444444;margin-bottom: 50px;}\n";
-  ptr += ".button {display: block;width: 80px;background-color: #1abc9c;border: none;color: white;padding: 13px 30px;text-decoration: none;font-size: 25px;margin: 0px auto 35px;cursor: pointer;border-radius: 4px;}\n";
-  ptr += ".button-on {background-color: #3498db;}\n";
-  ptr += ".button-on:active {background-color: #3498db;}\n";
-  ptr += ".button-off {background-color: #34495e;}\n";
-  ptr += ".button-off:active {background-color: #2c3e50;}\n";
-  ptr += "p {font-size: 14px;color: #888;margin-bottom: 10px;}\n";
-  ptr += "</style>\n";
-  ptr += "</head>\n";
-  ptr += "<body>\n";
-  ptr += "<h1>ESP8266 Web Server</h1>\n";
-  ptr += "<h3>CODER PATH JOFFRE HERMOSILLA SALAS [DEVELOPER] </h3><img src='https://raw.githubusercontent.com/Hackathon-ChatGPT-NTTDATA/eurekaserver/master/src/main/resources/fotocreador/spring-logo-eureka.png' alt='CODER PATH' /> \n";
-  ptr += "<h1> </h1>\n";
-  ptr += "<a href='http://192.168.1.184/tankStatus'>TANQUE DE AGUA</a>\n";
-  ptr += "<h1> </h1>\n";
-  ptr += "<a href='/tankStatus'>Dos botones</a>\n";
-  if (LEDstatus)
-  {
-    ptr += "<p>BLUE LED: ON</p><a class=\"button button-off\" href=\"/ledoff\">OFF</a>\n";
+  if (!client.connected()) {
+    reconnect_mqtt();
   }
-  else
-  {
-    ptr += "<p>BLUE LED: OFF</p><a class=\"button button-on\" href=\"/ledon\">ON</a>\n";
+  client.loop();
+
+  unsigned long now = millis();
+  if (now - lastMsg > 2000) {
+    lastMsg = now;
+    value = analogRead(A0)*0.32;
+    snprintf (msg, MSG_BUFFER_SIZE, "Temperature is :%ld", value);
+    Serial.print("Publish message: ");
+    Serial.println(msg);
+    client.publish("device/temp", msg);
   }
 
-  ptr += "</body>\n";
-  ptr += "</html>\n";
-  return ptr;
 }
 
-byte sendEmail(String x)
-{
-  WiFiClient client = server.client();
-  if (client.connect("mail.smtp2go.com", 587) == 1)
+  void getTankStatus()
   {
-    Serial.println(F("connected"));
+
+    Serial.print("Get tank status");
+    Serial.print("Get tank status");
+    jsonDocument.clear();
+    jsonDocument["level"] = intLevel;
+    jsonDocument["volume"] = intVolume;
+    jsonDocument["WaterColumn"] = floatLevelCm;
+    serializeJson(jsonDocument, bufferJson);
+    server.send(200, "application/json", bufferJson);
   }
-  else
+
+  void handle_OnConnect()
   {
-    Serial.println(F("connection failed"));
-    return 0;
+    LEDstatus = LOW;
+    Serial.println("LED: OFF");
+    server.send(200, "text/html", updateWebpage(LEDstatus));
   }
 
-  if (!eRcv(client))
-    return 0;
-  Serial.println(F("--- Sending EHLO"));
-  client.println("EHLO 1.2.3.4");
-  if (!eRcv(client))
-    return 0;
-  Serial.println(F("--- Sending login"));
-  client.println("AUTH LOGIN");
-  if (!eRcv(client))
-    return 0;
-  Serial.println(F("--- Sending User base64"));
-  client.println(user_base64);
-  if (!eRcv(client))
-    return 0;
-  Serial.println(F("--- Sending Password base64"));
-  client.println(user_password_base64);
-  if (!eRcv(client))
-    return 0;
-  Serial.println(F("--- Sending From"));
-  client.println(from_email);
-  if (!eRcv(client))
-    return 0;
-  Serial.println(F("--- Sending To"));
-  client.println(to_email);
-  if (!eRcv(client))
-    return 0;
-  Serial.println(F("--- Sending DATA"));
-  client.println(F("DATA"));
-  if (!eRcv(client))
-    return 0;
-  client.println(F("Subject: E-mail prueba NODEMCU\r\n"));
-  client.println(x);
-  client.println(F("."));
-
-  if (!eRcv(client))
-    return 0;
-  Serial.println(F("--- Sending QUIT"));
-  client.println(F("QUIT"));
-  if (!eRcv(client))
-    return 0;
-  client.stop();
-  return 1;
-}
-
-byte eRcv(WiFiClient client)
-{
-  byte respCode;
-  byte thisByte;
-  int loopCount = 0;
-
-  while (!client.available())
+  void handle_ledon()
   {
-    delay(1);
-    loopCount++;
-    if (loopCount > 10000)
+    LEDstatus = HIGH;
+    Serial.println("LED: ON");
+    server.send(200, "text/html", updateWebpage(LEDstatus));
+  }
+
+  void handle_ledoff()
+  {
+    LEDstatus = LOW;
+    Serial.println("LED: OFF");
+    server.send(200, "text/html", updateWebpage(LEDstatus));
+  }
+
+  void handle_NotFound()
+  {
+    server.send(404, "text/plain", "Not found");
+  }
+
+  String updateWebpage(uint8_t LEDstatus)
+  {
+    String ptr = "<!DOCTYPE html> <html>\n";
+    ptr += "<head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0, user-scalable=no\">\n";
+    ptr += "<title>CODER PATH ESP8266 PLATFORM</title>\n";
+    ptr += "<link rel='shortcut icon' href='https://avatars.githubusercontent.com/u/145310760?s=400&u=a8d4e2b367b3d851668f549621cec1c9aec5193b&v=4' />\n";
+    ptr += "<style>html {font-family: Helvetica; display: inline-block; margin: 0px auto; text-align: center;}\n";
+    ptr += "body{margin-top: 50px;} h1 {color: #444444;margin: 50px auto 30px;} h3 {color: #444444;margin-bottom: 50px;}\n";
+    ptr += ".button {display: block;width: 80px;background-color: #1abc9c;border: none;color: white;padding: 13px 30px;text-decoration: none;font-size: 25px;margin: 0px auto 35px;cursor: pointer;border-radius: 4px;}\n";
+    ptr += ".button-on {background-color: #3498db;}\n";
+    ptr += ".button-on:active {background-color: #3498db;}\n";
+    ptr += ".button-off {background-color: #34495e;}\n";
+    ptr += ".button-off:active {background-color: #2c3e50;}\n";
+    ptr += "p {font-size: 14px;color: #888;margin-bottom: 10px;}\n";
+    ptr += "</style>\n";
+    ptr += "</head>\n";
+    ptr += "<body>\n";
+    ptr += "<h1>ESP8266 Web Server</h1>\n";
+    ptr += "<h3>CODER PATH JOFFRE HERMOSILLA SALAS [DEVELOPER] </h3><img src='https://raw.githubusercontent.com/Hackathon-ChatGPT-NTTDATA/eurekaserver/master/src/main/resources/fotocreador/spring-logo-eureka.png' alt='CODER PATH' /> \n";
+    ptr += "<h1> </h1>\n";
+    ptr += "<a href='http://192.168.1.184/tankStatus'>TANQUE DE AGUA</a>\n";
+    ptr += "<h1> </h1>\n";
+    ptr += "<a href='/tankStatus'>Dos botones</a>\n";
+    if (LEDstatus)
     {
-      client.stop();
-      Serial.println(F("\r\nTimeout"));
+      ptr += "<p>BLUE LED: ON</p><a class=\"button button-off\" href=\"/ledoff\">OFF</a>\n";
+    }
+    else
+    {
+      ptr += "<p>BLUE LED: OFF</p><a class=\"button button-on\" href=\"/ledon\">ON</a>\n";
+    }
+
+    ptr += "</body>\n";
+    ptr += "</html>\n";
+    return ptr;
+  }
+
+  byte sendEmail(String x)
+  {
+    WiFiClient client = server.client();
+    if (client.connect("mail.smtp2go.com", 587) == 1)
+    {
+      Serial.println(F("connected"));
+    }
+    else
+    {
+      Serial.println(F("connection failed"));
       return 0;
     }
+
+    if (!eRcv(client))
+      return 0;
+    Serial.println(F("--- Sending EHLO"));
+    client.println("EHLO 1.2.3.4");
+    if (!eRcv(client))
+      return 0;
+    Serial.println(F("--- Sending login"));
+    client.println("AUTH LOGIN");
+    if (!eRcv(client))
+      return 0;
+    Serial.println(F("--- Sending User base64"));
+    client.println(user_base64);
+    if (!eRcv(client))
+      return 0;
+    Serial.println(F("--- Sending Password base64"));
+    client.println(user_password_base64);
+    if (!eRcv(client))
+      return 0;
+    Serial.println(F("--- Sending From"));
+    client.println(from_email);
+    if (!eRcv(client))
+      return 0;
+    Serial.println(F("--- Sending To"));
+    client.println(to_email);
+    if (!eRcv(client))
+      return 0;
+    Serial.println(F("--- Sending DATA"));
+    client.println(F("DATA"));
+    if (!eRcv(client))
+      return 0;
+    client.println(F("Subject: E-mail prueba NODEMCU\r\n"));
+    client.println(x);
+    client.println(F("."));
+
+    if (!eRcv(client))
+      return 0;
+    Serial.println(F("--- Sending QUIT"));
+    client.println(F("QUIT"));
+    if (!eRcv(client))
+      return 0;
+    client.stop();
+    return 1;
   }
 
-  respCode = client.peek();
-  while (client.available())
+  byte eRcv(WiFiClient client)
   {
-    thisByte = client.read();
-    Serial.write(thisByte);
-  }
-  if (respCode >= '4')
-    return 0;
-  return 1;
-}
+    byte respCode;
+    byte thisByte;
+    int loopCount = 0;
 
-/* Callback function to get the Email sending status */
-void smtpCallback(SMTP_Status status)
-{
-  /* Print the current status */
-  Serial.println(status.info());
-
-  /* Print the sending result */
-  if (status.success())
-  {
-    // ESP_MAIL_PRINTF used in the examples is for format printing via debug Serial port
-    // that works for all supported Arduino platform SDKs e.g. AVR, SAMD, ESP32 and ESP8266.
-    // In ESP8266 and ESP32, you can use Serial.printf directly.
-
-    Serial.println("----------------");
-    ESP_MAIL_PRINTF("Message sent success: %d\n", status.completedCount());
-    ESP_MAIL_PRINTF("Message sent failed: %d\n", status.failedCount());
-    Serial.println("----------------\n");
-
-    for (size_t i = 0; i < smtp.sendingResult.size(); i++)
+    while (!client.available())
     {
-      /* Get the result item */
-      SMTP_Result result = smtp.sendingResult.getItem(i);
-
-      // In case, ESP32, ESP8266 and SAMD device, the timestamp get from result.timestamp should be valid if
-      // your device time was synched with NTP server.
-      // Other devices may show invalid timestamp as the device time was not set i.e. it will show Jan 1, 1970.
-      // You can call smtp.setSystemTime(xxx) to set device time manually. Where xxx is timestamp (seconds since Jan 1, 1970)
-
-      ESP_MAIL_PRINTF("Message No: %d\n", i + 1);
-      ESP_MAIL_PRINTF("Status: %s\n", result.completed ? "success" : "failed");
-      ESP_MAIL_PRINTF("Date/Time: %s\n", MailClient.Time.getDateTimeString(result.timestamp, "%B %d, %Y %H:%M:%S").c_str());
-      ESP_MAIL_PRINTF("Recipient: %s\n", result.recipients.c_str());
-      ESP_MAIL_PRINTF("Subject: %s\n", result.subject.c_str());
+      delay(1);
+      loopCount++;
+      if (loopCount > 10000)
+      {
+        client.stop();
+        Serial.println(F("\r\nTimeout"));
+        return 0;
+      }
     }
-    Serial.println("----------------\n");
 
-    // You need to clear sending result as the memory usage will grow up.
-    smtp.sendingResult.clear();
-  }
-}
-
-void gmail_configuration()
-{
-
-  /*  Set the network reconnection option */
-  MailClient.networkReconnect(true);
-
-  /** Enable the debug via Serial port
-   * 0 for no debugging
-   * 1 for basic level debugging
-   *
-   * Debug port can be changed via ESP_MAIL_DEFAULT_DEBUG_PORT in ESP_Mail_FS.h
-   */
-  smtp.debug(1);
-
-  /* Set the callback function to get the sending results */
-  smtp.callback(smtpCallback);
-
-  /* Declare the Session_Config for user defined session credentials */
-  Session_Config config;
-
-  /* Set the session config */
-  config.server.host_name = SMTP_HOST;
-  config.server.port = SMTP_PORT;
-  config.login.email = AUTHOR_EMAIL;
-  config.login.password = AUTHOR_PASSWORD;
-  config.login.user_domain = "";
-
-  /*
-  Set the NTP config time
-  For times east of the Prime Meridian use 0-12
-  For times west of the Prime Meridian add 12 to the offset.
-  Ex. American/Denver GMT would be -6. 6 + 12 = 18
-  See https://en.wikipedia.org/wiki/Time_zone for a list of the GMT/UTC timezone offsets
-  */
-  config.time.ntp_server = F("pool.ntp.org,time.nist.gov");
-  config.time.gmt_offset = 3;
-  config.time.day_light_offset = 0;
-
-  /* Declare the message class */
-  SMTP_Message message;
-
-  /* Set the message headers */
-  message.sender.name = F("ESP");
-  message.sender.email = AUTHOR_EMAIL;
-  message.subject = F("ESP Test Email");
-  message.addRecipient(F("Sara"), RECIPIENT_EMAIL);
-
-  /*Send HTML message*/
-  /*String htmlMsg = "<div style=\"color:#2f4468;\"><h1>Hello World!</h1><p>- Sent from ESP board</p></div>";
-  message.html.content = htmlMsg.c_str();
-  message.html.content = htmlMsg.c_str();
-  message.text.charSet = "us-ascii";
-  message.html.transfer_encoding = Content_Transfer_Encoding::enc_7bit;*/
-
-  // Send raw text message
-  String textMsg = "Hello World! - Sent from ESP board";
-  message.text.content = textMsg.c_str();
-  message.text.charSet = "us-ascii";
-  message.text.transfer_encoding = Content_Transfer_Encoding::enc_7bit;
-
-  message.priority = esp_mail_smtp_priority::esp_mail_smtp_priority_low;
-  message.response.notify = esp_mail_smtp_notify_success | esp_mail_smtp_notify_failure | esp_mail_smtp_notify_delay;
-
-  /* Connect to the server */
-  if (!smtp.connect(&config))
-  {
-    ESP_MAIL_PRINTF("Connection error, Status Code: %d, Error Code: %d, Reason: %s", smtp.statusCode(), smtp.errorCode(), smtp.errorReason().c_str());
-    return;
+    respCode = client.peek();
+    while (client.available())
+    {
+      thisByte = client.read();
+      Serial.write(thisByte);
+    }
+    if (respCode >= '4')
+      return 0;
+    return 1;
   }
 
-  if (!smtp.isLoggedIn())
+  /* Callback function to get the Email sending status */
+  void smtpCallback(SMTP_Status status)
   {
-    Serial.println("\nNot yet logged in.");
+    /* Print the current status */
+    Serial.println(status.info());
+
+    /* Print the sending result */
+    if (status.success())
+    {
+      // ESP_MAIL_PRINTF used in the examples is for format printing via debug Serial port
+      // that works for all supported Arduino platform SDKs e.g. AVR, SAMD, ESP32 and ESP8266.
+      // In ESP8266 and ESP32, you can use Serial.printf directly.
+
+      Serial.println("----------------");
+      ESP_MAIL_PRINTF("Message sent success: %d\n", status.completedCount());
+      ESP_MAIL_PRINTF("Message sent failed: %d\n", status.failedCount());
+      Serial.println("----------------\n");
+
+      for (size_t i = 0; i < smtp.sendingResult.size(); i++)
+      {
+        /* Get the result item */
+        SMTP_Result result = smtp.sendingResult.getItem(i);
+
+        // In case, ESP32, ESP8266 and SAMD device, the timestamp get from result.timestamp should be valid if
+        // your device time was synched with NTP server.
+        // Other devices may show invalid timestamp as the device time was not set i.e. it will show Jan 1, 1970.
+        // You can call smtp.setSystemTime(xxx) to set device time manually. Where xxx is timestamp (seconds since Jan 1, 1970)
+
+        ESP_MAIL_PRINTF("Message No: %d\n", i + 1);
+        ESP_MAIL_PRINTF("Status: %s\n", result.completed ? "success" : "failed");
+        ESP_MAIL_PRINTF("Date/Time: %s\n", MailClient.Time.getDateTimeString(result.timestamp, "%B %d, %Y %H:%M:%S").c_str());
+        ESP_MAIL_PRINTF("Recipient: %s\n", result.recipients.c_str());
+        ESP_MAIL_PRINTF("Subject: %s\n", result.subject.c_str());
+      }
+      Serial.println("----------------\n");
+
+      // You need to clear sending result as the memory usage will grow up.
+      smtp.sendingResult.clear();
+    }
   }
-  else
+
+  void gmail_configuration()
   {
-    if (smtp.isAuthenticated())
-      Serial.println("\nSuccessfully logged in.");
+
+    /*  Set the network reconnection option */
+    MailClient.networkReconnect(true);
+
+    /** Enable the debug via Serial port
+     * 0 for no debugging
+     * 1 for basic level debugging
+     *
+     * Debug port can be changed via ESP_MAIL_DEFAULT_DEBUG_PORT in ESP_Mail_FS.h
+     */
+    smtp.debug(1);
+
+    /* Set the callback function to get the sending results */
+    smtp.callback(smtpCallback);
+
+    /* Declare the Session_Config for user defined session credentials */
+    Session_Config config;
+
+    /* Set the session config */
+    config.server.host_name = SMTP_HOST;
+    config.server.port = SMTP_PORT;
+    config.login.email = AUTHOR_EMAIL;
+    config.login.password = AUTHOR_PASSWORD;
+    config.login.user_domain = "";
+
+    /*
+    Set the NTP config time
+    For times east of the Prime Meridian use 0-12
+    For times west of the Prime Meridian add 12 to the offset.
+    Ex. American/Denver GMT would be -6. 6 + 12 = 18
+    See https://en.wikipedia.org/wiki/Time_zone for a list of the GMT/UTC timezone offsets
+    */
+    config.time.ntp_server = F("pool.ntp.org,time.nist.gov");
+    config.time.gmt_offset = 3;
+    config.time.day_light_offset = 0;
+
+    /* Declare the message class */
+    SMTP_Message message;
+
+    /* Set the message headers */
+    message.sender.name = F("ESP");
+    message.sender.email = AUTHOR_EMAIL;
+    message.subject = F("ESP Test Email");
+    message.addRecipient(F("Sara"), RECIPIENT_EMAIL);
+
+    /*Send HTML message*/
+    /*String htmlMsg = "<div style=\"color:#2f4468;\"><h1>Hello World!</h1><p>- Sent from ESP board</p></div>";
+    message.html.content = htmlMsg.c_str();
+    message.html.content = htmlMsg.c_str();
+    message.text.charSet = "us-ascii";
+    message.html.transfer_encoding = Content_Transfer_Encoding::enc_7bit;*/
+
+    // Send raw text message
+    String textMsg = "Hello World! - Sent from ESP board";
+    message.text.content = textMsg.c_str();
+    message.text.charSet = "us-ascii";
+    message.text.transfer_encoding = Content_Transfer_Encoding::enc_7bit;
+
+    message.priority = esp_mail_smtp_priority::esp_mail_smtp_priority_low;
+    message.response.notify = esp_mail_smtp_notify_success | esp_mail_smtp_notify_failure | esp_mail_smtp_notify_delay;
+
+    /* Connect to the server */
+    if (!smtp.connect(&config))
+    {
+      ESP_MAIL_PRINTF("Connection error, Status Code: %d, Error Code: %d, Reason: %s", smtp.statusCode(), smtp.errorCode(), smtp.errorReason().c_str());
+      return;
+    }
+
+    if (!smtp.isLoggedIn())
+    {
+      Serial.println("\nNot yet logged in.");
+    }
     else
-      Serial.println("\nConnected with no Auth.");
-  }
-
-  /* Start sending Email and close the session */
-  if (!MailClient.sendMail(&smtp, &message))
-    ESP_MAIL_PRINTF("Error, Status Code: %d, Error Code: %d, Reason: %s", smtp.statusCode(), smtp.errorCode(), smtp.errorReason().c_str());
-}
-
-void onServerResponseReceived(String message)
-{
-  Serial.println(message);
-}
-
-void onMessageReceived(String message)
-{
-  message.toUpperCase();
-  Serial.println(message);
-
-  if (message.equals("START"))
-  {
-    whatabotClient.sendMessageWS("Starting");
-    // Add your logic for starting here
-  }
-  else if (message.equals("STOP"))
-  {
-    whatabotClient.sendMessageWS("Stopping");
-    // Add your logic for stopping here
-  }
-  else if (message.equals("PAUSE"))
-  {
-    whatabotClient.sendMessageWS("Pausing");
-    // Add your logic for pausing here
-  }
-  else if (message.equals("RESUME"))
-  {
-    whatabotClient.sendMessageWS("Resumming");
-    // Add your logic for resuming here
-  }
-  else
-  {
-    whatabotClient.sendMessageWS("Unknown command");
-    // Handle unknown commands here (optional)
-  }
-}
-
-void setup_wifi()
-{
-  delay(100);
-  // We start by connecting to a WiFi network
-  Serial.print("Connecting to ");
-  Serial.println(ssid);
-  WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED)
-  {
-    delay(500);
-    Serial.print(".");
-  }
-  randomSeed(micros());
-  Serial.println("");
-  Serial.println("WiFi connected");
-  Serial.println("IP address: ");
-  Serial.println(WiFi.localIP());
-}
-
-void callback(char *topic, byte *payload, unsigned int length)
-{
-  // Receiving message as subscriber
-  Serial.print("Message arrived in topic: ");
-  Serial.println(topic);
-  String json_received;
-  Serial.print("JSON Received:");
-  for (int i = 0; i < length; i++)
-  {
-    json_received += ((char)payload[i]);
-    // Serial.print((char)payload[i]);
-  }
-  Serial.println(json_received);
-  // if receive ask status from node-red, send current status of lamps
-  if (json_received == "Status")
-  {
-    check_stat();
-  }
-  else
-  {
-    // Parse json
-    // StaticJsonBuffer<200> jsonBuffer;  //arudion json v5
-    // JsonObject& root = jsonBuffer.parseObject(json_received);
-
-    JsonDocument doc;
-    // JsonObject& JSONencoder = JSONbuffer.createObject();
-    JsonObject root = doc.to<JsonObject>();
-
-    // get json parsed value
-    // sample of json: {"device":"Lamp1","trigger":"on"}
-    Serial.print("Command:");
-    String device = root["device"];
-    String trigger = root["trigger"];
-    Serial.println("Turn " + trigger + " " + device);
-    Serial.println("-----------------------");
-    // Trigger device
-    // Lamp1***************************
-    if (device == "Lamp1")
     {
-      if (trigger == "on")
-      {
-        digitalWrite(lamp1, LOW);
-      }
+      if (smtp.isAuthenticated())
+        Serial.println("\nSuccessfully logged in.");
       else
-      {
-        digitalWrite(lamp1, HIGH);
-      }
+        Serial.println("\nConnected with no Auth.");
     }
-    // Lamp2***************************
-    if (device == "Lamp2")
-    {
-      if (trigger == "on")
-      {
-        digitalWrite(lamp2, LOW);
-      }
-      else
-      {
-        digitalWrite(lamp2, HIGH);
-      }
-    }
-    // Lamp3***************************
-    if (device == "Lamp3")
-    {
-      if (trigger == "on")
-      {
-        digitalWrite(lamp3, LOW);
-      }
-      else
-      {
-        digitalWrite(lamp3, HIGH);
-      }
-    }
-    // All***************************
-    if (device == "All")
-    {
-      if (trigger == "on")
-      {
-        digitalWrite(lamp1, LOW);
-        digitalWrite(lamp2, LOW);
-        digitalWrite(lamp3, LOW);
-      }
-      else
-      {
-        digitalWrite(lamp1, HIGH);
-        digitalWrite(lamp2, HIGH);
-        digitalWrite(lamp3, HIGH);
-      }
-    }
-    check_stat();
-  }
-}
 
-void reconnect()
-{
-  // Loop until we're reconnected
-  while (!client.connected())
+    /* Start sending Email and close the session */
+    if (!MailClient.sendMail(&smtp, &message))
+      ESP_MAIL_PRINTF("Error, Status Code: %d, Error Code: %d, Reason: %s", smtp.statusCode(), smtp.errorCode(), smtp.errorReason().c_str());
+  }
+
+  void onServerResponseReceived(String message)
   {
-    Serial.print("Attempting MQTT connection...");
-    // Create a random client ID
-    String clientId = "ESP8266Client-";
-    clientId += String(random(0xffff), HEX);
-    // Attempt to connect
-    // if you MQTT broker has clientID,username and password
-    // please change following line to    if (client.connect(clientId,userName,passWord))
-    if (client.connect(clientId.c_str()))
+    Serial.println(message);
+  }
+
+  void onMessageReceived(String message)
+  {
+    message.toUpperCase();
+    Serial.println(message);
+
+    if (message.equals("START"))
     {
-      Serial.println("connected");
-      // once connected to MQTT broker, subscribe command if any
-      client.subscribe(topic_sub);
+      whatabotClient.sendMessageWS("Starting");
+      // Add your logic for starting here
+    }
+    else if (message.equals("STOP"))
+    {
+      whatabotClient.sendMessageWS("Stopping");
+      // Add your logic for stopping here
+    }
+    else if (message.equals("PAUSE"))
+    {
+      whatabotClient.sendMessageWS("Pausing");
+      // Add your logic for pausing here
+    }
+    else if (message.equals("RESUME"))
+    {
+      whatabotClient.sendMessageWS("Resumming");
+      // Add your logic for resuming here
+    }
+    else
+    {
+      whatabotClient.sendMessageWS("Unknown command");
+      // Handle unknown commands here (optional)
+    }
+  }
+
+  void setup_wifi()
+  {
+    delay(100);
+    // We start by connecting to a WiFi network
+    Serial.print("Connecting to ");
+    Serial.println(ssid);
+    WiFi.begin(ssid, password);
+    while (WiFi.status() != WL_CONNECTED)
+    {
+      delay(500);
+      Serial.print(".");
+    }
+    randomSeed(micros());
+    Serial.println("");
+    Serial.println("WiFi connected");
+    Serial.println("IP address: ");
+    Serial.println(WiFi.localIP());
+  }
+
+  void callback(char *topic, byte *payload, unsigned int length)
+  {
+    // Receiving message as subscriber
+    Serial.print("Message arrived in topic: ");
+    Serial.println(topic);
+    String json_received;
+    Serial.print("JSON Received:");
+    for (int i = 0; i < length; i++)
+    {
+      json_received += ((char)payload[i]);
+      // Serial.print((char)payload[i]);
+    }
+    Serial.println(json_received);
+    // if receive ask status from node-red, send current status of lamps
+    if (json_received == "Status")
+    {
       check_stat();
     }
     else
     {
-      Serial.print("failed, rc=");
-      Serial.print(client.state());
-      Serial.println(" try again in 5 seconds");
-      // Wait 5 seconds before retrying
-      delay(5000);
+      // Parse json
+      // StaticJsonBuffer<200> jsonBuffer;  //arudion json v5
+      // JsonObject& root = jsonBuffer.parseObject(json_received);
+
+      JsonDocument doc;
+      // JsonObject& JSONencoder = JSONbuffer.createObject();
+      JsonObject root = doc.to<JsonObject>();
+
+      // get json parsed value
+      // sample of json: {"device":"Lamp1","trigger":"on"}
+      Serial.print("Command:");
+      String device = root["device"];
+      String trigger = root["trigger"];
+      Serial.println("Turn " + trigger + " " + device);
+      Serial.println("-----------------------");
+      // Trigger device
+      // Lamp1***************************
+      if (device == "Lamp1")
+      {
+        if (trigger == "on")
+        {
+          digitalWrite(lamp1, LOW);
+        }
+        else
+        {
+          digitalWrite(lamp1, HIGH);
+        }
+      }
+      // Lamp2***************************
+      if (device == "Lamp2")
+      {
+        if (trigger == "on")
+        {
+          digitalWrite(lamp2, LOW);
+        }
+        else
+        {
+          digitalWrite(lamp2, HIGH);
+        }
+      }
+      // Lamp3***************************
+      if (device == "Lamp3")
+      {
+        if (trigger == "on")
+        {
+          digitalWrite(lamp3, LOW);
+        }
+        else
+        {
+          digitalWrite(lamp3, HIGH);
+        }
+      }
+      // All***************************
+      if (device == "All")
+      {
+        if (trigger == "on")
+        {
+          digitalWrite(lamp1, LOW);
+          digitalWrite(lamp2, LOW);
+          digitalWrite(lamp3, LOW);
+        }
+        else
+        {
+          digitalWrite(lamp1, HIGH);
+          digitalWrite(lamp2, HIGH);
+          digitalWrite(lamp3, HIGH);
+        }
+      }
+      check_stat();
     }
   }
-}
 
-void check_stat()
-{
-  // check output status--------------------------------------------
-  // This function will update lamp status to mqtt
-  // StaticJsonBuffer<300> JSONbuffer; //arudion json v5
-  JsonDocument doc;
-  // JsonObject& JSONencoder = JSONbuffer.createObject();
-  JsonObject JSONencoder = doc.to<JsonObject>();
-
-  bool stat_lamp1 = digitalRead(lamp1);
-  bool stat_lamp2 = digitalRead(lamp2);
-  bool stat_lamp3 = digitalRead(lamp3);
-  // lamp1==========================
-  if (stat_lamp1 == false)
+  void reconnect()
   {
-    JSONencoder["lamp1"] = true;
-  }
-  else
-  {
-    JSONencoder["lamp1"] = false;
-  }
-  // lamp2==========================
-  if (stat_lamp2 == false)
-  {
-    JSONencoder["lamp2"] = true;
-  }
-  else
-  {
-    JSONencoder["lamp2"] = false;
-  }
-  // lamp3==========================
-  if (stat_lamp3 == false)
-  {
-    JSONencoder["lamp3"] = true;
-  }
-  else
-  {
-    JSONencoder["lamp3"] = false;
+    // Loop until we're reconnected
+    while (!client.connected())
+    {
+      Serial.print("Attempting MQTT connection...");
+      // Create a random client ID
+      String clientId = "ESP8266Client-";
+      clientId += String(random(0xffff), HEX);
+      // Attempt to connect
+      // if you MQTT broker has clientID,username and password
+      // please change following line to    if (client.connect(clientId,userName,passWord))
+      if (client.connect(clientId.c_str()))
+      {
+        Serial.println("connected");
+        // once connected to MQTT broker, subscribe command if any
+        client.subscribe(topic_sub);
+        check_stat();
+      }
+      else
+      {
+        Serial.print("failed, rc=");
+        Serial.print(client.state());
+        Serial.println(" try again in 5 seconds");
+        // Wait 5 seconds before retrying
+        delay(5000);
+      }
+    }
   }
 
-  JSONencoder["device"] = "ESP8266";
-  JSONencoder["temperature"] = t;
-  JSONencoder["humidity"] = h;
-
-  char JSONmessageBuffer[100];
-  // JSONencoder.printTo(JSONmessageBuffer, sizeof(JSONmessageBuffer));// arduion json v5
-  // serializeJson(JSONmessageBuffer);
-
-  Serial.println("Sending message to MQTT topic..");
-  Serial.println(JSONmessageBuffer);
-  // JSONencoder.printTo(JSONmessageBuffer, sizeof(JSONmessageBuffer));
-  // serializeJson(JSONmessageBuffer);
-  if (client.publish(topic_pub, JSONmessageBuffer) == true)
+  void check_stat()
   {
-    Serial.println("Success sending message");
+    // check output status--------------------------------------------
+    // This function will update lamp status to mqtt
+    // StaticJsonBuffer<300> JSONbuffer; //arudion json v5
+    JsonDocument doc;
+    // JsonObject& JSONencoder = JSONbuffer.createObject();
+    JsonObject JSONencoder = doc.to<JsonObject>();
+
+    bool stat_lamp1 = digitalRead(lamp1);
+    bool stat_lamp2 = digitalRead(lamp2);
+    bool stat_lamp3 = digitalRead(lamp3);
+    // lamp1==========================
+    if (stat_lamp1 == false)
+    {
+      JSONencoder["lamp1"] = true;
+    }
+    else
+    {
+      JSONencoder["lamp1"] = false;
+    }
+    // lamp2==========================
+    if (stat_lamp2 == false)
+    {
+      JSONencoder["lamp2"] = true;
+    }
+    else
+    {
+      JSONencoder["lamp2"] = false;
+    }
+    // lamp3==========================
+    if (stat_lamp3 == false)
+    {
+      JSONencoder["lamp3"] = true;
+    }
+    else
+    {
+      JSONencoder["lamp3"] = false;
+    }
+
+    JSONencoder["device"] = "ESP8266";
+    JSONencoder["temperature"] = t;
+    JSONencoder["humidity"] = h;
+
+    char JSONmessageBuffer[100];
+    // JSONencoder.printTo(JSONmessageBuffer, sizeof(JSONmessageBuffer));// arduion json v5
+    // serializeJson(JSONmessageBuffer);
+
+    Serial.println("Sending message to MQTT topic..");
+    Serial.println(JSONmessageBuffer);
+    // JSONencoder.printTo(JSONmessageBuffer, sizeof(JSONmessageBuffer));
+    // serializeJson(JSONmessageBuffer);
+    if (client.publish(topic_pub, JSONmessageBuffer) == true)
+    {
+      Serial.println("Success sending message");
+    }
+    else
+    {
+      Serial.println("Error sending message");
+    }
+    Serial.println("-------------");
   }
-  else
+
+  void setup_wifi_mqtt()
   {
-    Serial.println("Error sending message");
+
+    delay(10);
+    // We start by connecting to a WiFi network
+    Serial.println();
+    Serial.print("Connecting to ");
+    Serial.println(ssid);
+
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(ssid, password);
+
+    while (WiFi.status() != WL_CONNECTED)
+    {
+      delay(500);
+      Serial.print(".");
+    }
+
+    randomSeed(micros());
+
+    Serial.println("");
+    Serial.println("WiFi connected");
+    Serial.println("IP address: ");
+    Serial.println(WiFi.localIP());
   }
-  Serial.println("-------------");
-}
+
+  void callback_mqtt(char *topic, byte *payload, unsigned int length)
+  {
+    Serial.print("Message arrived [");
+    Serial.print(topic);
+    Serial.print("] ");
+    for (int i = 0; i < length; i++)
+    {
+      Serial.print((char)payload[i]);
+    }
+    Serial.println();
+
+    // Switch on the LED if an 1 was received as first character
+    if ((char)payload[0] == '1')
+    {
+      digitalWrite(BUILTIN_LED, LOW); // Turn the LED on (Note that LOW is the voltage level
+      // but actually the LED is on; this is because
+      // it is active low on the ESP-01)
+    }
+    else
+    {
+      digitalWrite(BUILTIN_LED, HIGH); // Turn the LED off by making the voltage HIGH
+    }
+  }
+
+  void reconnect_mqtt()
+  {
+    // Loop until we're reconnected
+    while (!client.connected())
+    {
+      Serial.print("Attempting MQTT connection...");
+      // Create a random client ID
+      String clientId = "ESP8266Client-";
+      clientId += String(random(0xffff), HEX);
+      // Attempt to connect
+      if (client.connect(clientId.c_str()))
+      {
+        Serial.println("connected");
+        // Once connected, publish an announcement...
+        client.publish("device/temp", "MQTT Server is Connected");
+        // ... and resubscribe
+        client.subscribe("device/led");
+      }
+      else
+      {
+        Serial.print("failed, rc=");
+        Serial.print(client.state());
+        Serial.println(" try again in 5 seconds");
+        // Wait 5 seconds before retrying
+        delay(5000);
+      }
+    }
+  }
