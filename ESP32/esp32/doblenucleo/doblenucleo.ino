@@ -24,7 +24,12 @@ void loop3(void *parameter){
 }
 
 void setup() {
-
+ // Put ESP32 into Station mode
+  WiFi.mode(WIFI_MODE_STA);
+ 
+  // Print MAC Address to Serial monitor
+  Serial.print("MAC Address: ");
+  Serial.println(WiFi.macAddress());
   xTaskCreatePinnedToCore(
     loop2,
     "Task_2",

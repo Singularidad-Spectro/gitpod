@@ -36,6 +36,15 @@
 #include <WiFiManager.h>
 // Library for MQTT:
 #include <PubSubClient.h>
+
+//ESP-NOW
+#include <espnow.h>
+
+
+
+
+
+
 /****************what bot **********/
 
 #define WHATABOT_API_KEY "37fee9bc-ffc4-4ac9-964a"
@@ -136,6 +145,51 @@ const char *mqtt_server = "broker.mqtt-dashboard.com";
 int lamp1 = 16; // lamp for mqtt connected D0
 int lamp2 = 5;  // lamp for start indicator D1
 int lamp3 = 4;  // lamp for stop indicator D2
+
+
+
+
+//configuracion ESP-NOW
+// REPLACE WITH RECEIVER MAC Address
+//3C:84:27:28:FA:F8 
+
+
+uint8_t broadcastAddress[] = {0x3C, 0x84, 0x27, 0x28, 0xFA, 0xF8};
+
+// Structure example to send data
+// Must match the receiver structure
+typedef struct struct_message {
+  char a[32];
+  int b;
+  float c;
+  String d;
+  bool e;
+}
+ struct_message;
+
+// Create a struct_message called myData
+struct_message myData;
+
+unsigned long lastTime = 0;  
+unsigned long timerDelay = 2000;  // send readings timer
+
+// Callback when data is sent
+void OnDataSent(uint8_t *mac_addr, uint8_t sendStatus) {
+  Serial.print("Last Packet Send Status: ");
+  if (sendStatus == 0){
+    Serial.println("Delivery success");
+  }
+  else{
+    Serial.println("Delivery fail");
+  }
+}
+
+
+
+
+
+
+
 
 WiFiClient espClient;
 PubSubClient client(espClient);
@@ -319,9 +373,28 @@ bool initial = 1;
 
 void setup()
 {
+// saber la MAC para ESP NOw
+ 
+  // Set device as a Wi-Fi Station
+  WiFi.mode(WIFI_STA);
+
+  // Init ESP-NOW
+  if (esp_now_init() != 0) {
+    Serial.println("Error initializing ESP-NOW");
+    return;
+  }
+
+  // Once ESPNow is successfully Init, we will register for Send CB to
+  // get the status of Trasnmitted packet
+  esp_now_set_self_role(ESP_NOW_ROLE_CONTROLLER);
+  esp_now_register_send_cb(OnDataSent);
+  
+  // Register peer
+  esp_now_add_peer(broadcastAddress, ESP_NOW_ROLE_SLAVE, 1, NULL, 0);
+
 // comunicacion con arduino leonardo
 
-Serial2.begin(9600, SERIAL_8N1, RXp2, TXp2);
+//Serial2.begin(9600, SERIAL_8N1, RXp2, TXp2);
 
 
   /// reloj
@@ -589,7 +662,7 @@ Serial2.begin(9600, SERIAL_8N1, RXp2, TXp2);
 
 
   // CALL ME BOT
-   sendMessageCallmebot("Hello from ESP8266! EXITOSO MENSAJE DESDE CODER PATH ");
+   sendMessageCallmebot("Hello from ESP8266! EXITOSO MENSAJE DESDE CODER PATH " + WiFi.macAddress() );
 
 
      Serial.println("I'm awake, but I'm going into deep sleep mode for 5 hours");
@@ -599,9 +672,27 @@ Serial2.begin(9600, SERIAL_8N1, RXp2, TXp2);
 
 void loop()
 {
+
+// ESP-NOW 
+
+if ((millis() - lastTime) > timerDelay) {
+    // Set values to send
+    strcpy(myData.a, "THIS IS A CHAR");
+    myData.b = random(1,20);
+    myData.c = 1.2;
+    myData.d = "Hello";
+    myData.e = false;
+
+    // Send message via ESP-NOW
+    esp_now_send(broadcastAddress, (uint8_t *) &myData, sizeof(myData));
+
+    lastTime = millis();
+  }
+
+
   // comucnicacion con arduino leonardo
    Serial.println("Message Received: ");
-    Serial.println(Serial2.readString())
+  //  Serial.println(Serial2.readString())
 
 
 
@@ -674,6 +765,11 @@ void loop()
   floatLevelVolts = ((intPortValue * 3.3) / 4095) - 0.6;
   if (floatLevelVolts < 0.0)
     floatLevelVolts = 0;
+  Serial.println();
+  Serial.print("ESP Board MAC Address:  ");
+  Serial.println(WiFi.macAddress());
+  
+
   Serial.print("floatLevelVolts: ");
   Serial.println(floatLevelVolts);
   floatLevelCm = floatLevelVolts * floatCmPerVolt;
