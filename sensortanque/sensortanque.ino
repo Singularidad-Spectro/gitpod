@@ -52,8 +52,8 @@
 #define WHATABOT_PLATFORM "whatsapp"
 WiFiManager wifiManager;
 WhatabotAPIClient whatabotClient(WHATABOT_API_KEY, WHATABOT_CHAT_ID, WHATABOT_PLATFORM);
-#define AP_SSID "MILAGRITOS SALAS"
-#define AP_PASS "alisito2023"
+#define AP_SSID "CONSTIJOFF"
+#define AP_PASS "@2022Joy"
 /****************PIN Definitionz************/
 
 #define TRIGGER 2
@@ -239,8 +239,8 @@ int intLevel = 0;
 float floatLitersPerCm = 0.0;
 float floatSpeedOfSoundCMPMS = 0.0;
 
-const char *ssid = "MILAGRITOS SALAS";
-const char *password = "alisito2023";
+const char *ssid = "CONSTIJOFF";
+const char *password = "@2022Joy";
 
 const int SerialSpeed = 115200;
 const int tempAvg = 20;
@@ -1694,4 +1694,3 @@ void createDial (){
    tft.fillCircle(120, 121, 3, WHITE);                                               // pivot
    targetTime = millis() + 1000;   
 }
-
