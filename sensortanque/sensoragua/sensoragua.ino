@@ -1,6 +1,4 @@
-
-
-   #include "SPI.h"
+#include "SPI.h"
    #include "Adafruit_GFX.h"
    #include "Adafruit_GC9A01A.h"
    #include <NTPClient.h>
@@ -40,7 +38,12 @@
 //ESP-NOW
 #include <espnow.h>
 
-
+#include <SoftwareSerial.h>
+#define RXp2 16  // D0 en NodeMCU
+#define TXp2 17  // D1 en NodeMCU
+SoftwareSerial serialLeonardo(RXp2, TXp2); // RX, TX
+WiFiUDP ntpUDP;
+NTPClient timeClient(ntpUDP, "pool.ntp.org", -18000, 60000); // UTC-5 para Perú
 
 
 
@@ -109,12 +112,66 @@ const float TankCapacity = 750.0; // litros
 
 
 
-/// comunicacion con arduino leonardo
+// Variables para control de servos
+unsigned long lastServoCheck = 0;
+unsigned long lastInclinacionCheck = 0;
+int currentHourAngle = 0;
+int currentInclinacionAngle = 0;
 
-#define RXp2 16
-#define TXp2 17
+// Función para controlar el servo horario según la hora
+void updateServoHorario() {
+  int currentHour = timeClient.getHours();
+  int currentMinute = timeClient.getMinutes();
+  int newAngle = 0;
+  
+  // Mapeo de horas a ángulos
+  if (currentHour == 5) {
+    newAngle = 60;
+  } else if (currentHour == 12) {
+    newAngle = 120;
+  } else if (currentHour == 15) {  // 3 PM
+    newAngle = 180;
+  } else if (currentHour == 20) {  // 8 PM
+    newAngle = 0;
+  } else if (currentHour > 5 && currentHour < 12) {
+    // Interpolación entre 5 AM (60°) y 12 PM (120°)
+    newAngle = map(currentHour * 60 + currentMinute, 5 * 60, 12 * 60, 60, 120);
+  } else if (currentHour > 12 && currentHour < 15) {
+    // Interpolación entre 12 PM (120°) y 3 PM (180°)
+    newAngle = map(currentHour * 60 + currentMinute, 12 * 60, 15 * 60, 120, 180);
+  }
+  
+  // Solo enviar comando si el ángulo ha cambiado
+  if (newAngle != currentHourAngle) {
+    String command = "H:" + String(newAngle);
+    serialLeonardo.println(command);
+    currentHourAngle = newAngle;
+    Serial.println("Enviando comando horario: " + command);
+  }
+}
 
-
+// Función para controlar la inclinación cada 8 horas
+void updateServoInclinacion() {
+  int currentHour = timeClient.getHours();
+  int newAngle;
+  
+  // Cambiar inclinación cada 8 horas (0h, 8h, 16h)
+  if (currentHour >= 16) {
+    newAngle = 150;  // Tarde
+  } else if (currentHour >= 8) {
+    newAngle = 90;   // Mediodía
+  } else {
+    newAngle = 30;   // Mañana
+  }
+  
+  // Solo enviar comando si el ángulo ha cambiado
+  if (newAngle != currentInclinacionAngle) {
+    String command = "I:" + String(newAngle);
+    serialLeonardo.println(command);
+    currentInclinacionAngle = newAngle;
+    Serial.println("Enviando comando inclinación: " + command);
+  }
+}
 
 ///// reloj
 
@@ -456,8 +513,7 @@ void sendMessage(String message)
    int mm = 0;                                                                         // minutes variable
    int ss = 0;                                                                         // seconds variable
 
-   WiFiUDP ntpUDP;                                                                     // define NTP client to get time
-   NTPClient timeClient(ntpUDP, "pe.pool.ntp.org", utcOffsetInSeconds);  
+   // NTP ya está configurado anteriormente  
 
 bool initial = 1;
 
@@ -465,8 +521,13 @@ bool initial = 1;
 
 void setup()
 {
-// saber la MAC para ESP NOw
- 
+  Serial.begin(9600);
+  serialLeonardo.begin(9600);  // Inicializar comunicación con Leonardo
+  
+  // Inicializar NTP
+  timeClient.begin();
+  timeClient.setTimeOffset(-18000);  // UTC-5 para Perú
+  
   // Set device as a Wi-Fi Station
   WiFi.mode(WIFI_STA);
 
@@ -804,6 +865,13 @@ if ((millis() - lastTime) > timerDelay) {
             {
             mm=0;
             hh++;                                                                      // advance hour
+            
+            // Actualizar servos cada hora
+            updateServoHorario();
+            // Verificar si es hora de actualizar inclinación (cada 8 horas)
+            if (hh % 8 == 0) {
+              updateServoInclinacion();
+            }
             if (hh>23) 
                {
                hh=0;

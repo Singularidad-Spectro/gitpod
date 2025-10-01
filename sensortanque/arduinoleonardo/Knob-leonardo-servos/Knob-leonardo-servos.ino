@@ -1,48 +1,64 @@
 #include <Servo.h>
 
-#include <Servo.h>
-
-/*
- Controlling a servo position using a potentiometer (variable resistor)
- by Michal Rinott <http://people.interaction-ivrea.it/m.rinott>
-
- modified on 8 Nov 2013
- by Scott Fitzgerald
- http://www.arduino.cc/en/Tutorial/Knob
-*/
-
-#include <Servo.h>
-
-Servo myservo;  // create servo object to control a servo
-Servo servoMotor; 
-int potpin = A0;  // analog pin used to connect the potentiometer
-int val;    // variable to read the value from the analog pin
+Servo servoHorario;    // Servo para seguimiento horario
+Servo servoInclinacion;  // Servo para inclinación
+String inputString = "";
+boolean stringComplete = false;
 
 void setup() {
-  myservo.attach(9);  
-    servoMotor.attach(2);// attaches the servo on pin 2 to the servo object
+  Serial.begin(9600);  // Iniciar comunicación serial
+  servoHorario.attach(9);      // Servo horario en pin 9
+  servoInclinacion.attach(2);   // Servo inclinación en pin 2
+  
+  // Posición inicial
+  servoHorario.write(0);
+  servoInclinacion.write(0);
+  
+  inputString.reserve(200);
 }
 
 void loop() {
+  // Procesar comando cuando esté completo
+  if (stringComplete) {
+    processCommand(inputString);
+    inputString = "";
+    stringComplete = false;
+  }
+}
 
-//COMUNICACION CON ESP8266
-Serial.println("Hello Boss I'm Arduino Leonardo");
-  delay(1500);
+// Evento de recepción serial
+void serialEvent() {
+  while (Serial.available()) {
+    char inChar = (char)Serial.read();
+    if (inChar == '\n') {
+      stringComplete = true;
+    } else {
+      inputString += inChar;
+    }
+  }
+}
 
-  val = analogRead(potpin);            // reads the value of the potentiometer (value between 0 and 1023)
-  val = map(val, 0, 150, 0, 180);     // scale it for use with the servo (value between 0 and 180)
-  myservo.write(val);                  // sets the servo position according to the scaled value
-  delay(0.5);     
-  
-  // Desplazamos a la posición 0º
-  servoMotor.write(0);
-  delay(1000);  // Esperamos 1 segundo
-  
-  // Desplazamos a la posición 90º
-  servoMotor.write(90);
-  delay(1000);  // Esperamos 1 segundo
-  
-  // Desplazamos a la posición 180º
-  servoMotor.write(180);
-  delay(1000);  // Esperamos 1 segundo                      // waits for the servo to get there
+// Procesar comandos recibidos
+void processCommand(String command) {
+  // Formato: "H:angle" para horario, "I:angle" para inclinación
+  if (command.length() > 2 && command.charAt(1) == ':') {
+    char type = command.charAt(0);
+    int angle = command.substring(2).toInt();
+    
+    // Asegurar que el ángulo esté en rango
+    angle = constrain(angle, 0, 180);
+    
+    if (type == 'H') {
+      servoHorario.write(angle);
+      Serial.print("Horario a ");
+      Serial.print(angle);
+      Serial.println(" grados");
+    }
+    else if (type == 'I') {
+      servoInclinacion.write(angle);
+      Serial.print("Inclinacion a ");
+      Serial.print(angle);
+      Serial.println(" grados");
+    }
+  }
 }
