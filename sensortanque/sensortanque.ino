@@ -52,8 +52,14 @@
 #define WHATABOT_PLATFORM "whatsapp"
 WiFiManager wifiManager;
 WhatabotAPIClient whatabotClient(WHATABOT_API_KEY, WHATABOT_CHAT_ID, WHATABOT_PLATFORM);
-#define AP_SSID "CONSTIJOFF"
-#define AP_PASS "@2022Joy"
+/***************** WiFi SSID y Password múltiples ************/
+const char* ssid1 = "MILASALAS2025";
+const char* pass1 = "alisito2025";
+const char* ssid2 = "CONSTIJOFF";
+const char* pass2 = "@2022Joy";
+
+const char* ssid = nullptr;
+const char* password = nullptr;
 /****************PIN Definitionz************/
 
 #define TRIGGER 2
@@ -392,56 +398,77 @@ void setup()
   // Register peer
   esp_now_add_peer(broadcastAddress, ESP_NOW_ROLE_SLAVE, 1, NULL, 0);
 
-// comunicacion con arduino leonardo
-
-//Serial2.begin(9600, SERIAL_8N1, RXp2, TXp2);
-
+  // comunicacion con arduino leonardo
+  //Serial2.begin(9600, SERIAL_8N1, RXp2, TXp2);
 
   /// reloj
- tft.begin (); 
-   tft.setRotation (2);
-   tft.fillScreen (BLACK);  
-   delay (200);
-   tft.fillScreen (RED);
-   delay (200);
-   tft.fillScreen (GREEN);
-   delay (200);
-   tft.fillScreen (BLUE);
-   delay (200);
-   tft.fillScreen (BLACK);  
-   delay (200);
-   tft.fillScreen (GREY);
+  tft.begin (); 
+  tft.setRotation (2);
+  tft.fillScreen (BLACK);  
+  delay (200);
+  tft.fillScreen (RED);
+  delay (200);
+  tft.fillScreen (GREEN);
+  delay (200);
+  tft.fillScreen (BLUE);
+  delay (200);
+  tft.fillScreen (BLACK);  
+  delay (200);
+  tft.fillScreen (GREY);
+  createDial ();
 
-   createDial ();
+  Serial.begin (9600);
+  Serial.println ();
+  Serial.println ();
 
-   Serial.begin (9600);
-   Serial.println ();
-   Serial.println ();
-   WiFi.begin (ssid, password);
+  // Intentar conectar primero a la red 1
+  Serial.println("Intentando conectar a MILASALAS2025...");
+  WiFi.begin(ssid1, pass1);
+  unsigned long startAttemptTime = millis();
+  const unsigned long wifiTimeout = 10000; // 10 segundos
+  while (WiFi.status() != WL_CONNECTED && millis() - startAttemptTime < wifiTimeout) {
+    delay(500);
+    Serial.print(".");
+  }
+  if (WiFi.status() == WL_CONNECTED) {
+    ssid = ssid1;
+    password = pass1;
+    Serial.println("\nConectado a MILASALAS2025");
+  } else {
+    Serial.println("\nNo se pudo conectar a MILASALAS2025, intentando CONSTIJOFF...");
+    WiFi.begin(ssid2, pass2);
+    startAttemptTime = millis();
+    while (WiFi.status() != WL_CONNECTED && millis() - startAttemptTime < wifiTimeout) {
+      delay(500);
+      Serial.print(".");
+    }
+    if (WiFi.status() == WL_CONNECTED) {
+      ssid = ssid2;
+      password = pass2;
+      Serial.println("\nConectado a CONSTIJOFF");
+    } else {
+      Serial.println("\nNo se pudo conectar a ninguna red WiFi.");
+      // Aquí podrías lanzar WiFiManager si quieres modo AP de configuración
+    }
+  }
 
-   while (WiFi.status() != WL_CONNECTED ) 
-      {
-      delay (500);
-      Serial.print (".");
-      }
-   Serial.print ("connection with ");
-   Serial.println (ssid);  
-   Serial.println ("-------------------------------"); 
-   
-   timeClient.begin();
-   timeClient.update ();
-   Serial.print ("internet server time: ");   
-   Serial.println(timeClient.getFormattedTime());
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.print("connection with ");
+    Serial.println(ssid);
+    Serial.println("-------------------------------");
+  }
 
-   hh = timeClient.getHours ();
-   mm = timeClient.getMinutes ();
-   ss = timeClient.getSeconds ();
+  timeClient.begin();
+  timeClient.update ();
+  Serial.print ("internet server time: ");   
+  Serial.println(timeClient.getFormattedTime());
 
+  hh = timeClient.getHours ();
+  mm = timeClient.getMinutes ();
+  ss = timeClient.getSeconds ();
 
- 
-
-  //  wifiManager.autoConnect(AP_SSID, AP_PASS);
-  wifiManager.autoConnect(ssid, password);
+  // Si quieres usar WiFiManager como fallback, descomenta la siguiente línea:
+  // wifiManager.autoConnect("SensorTanque-Setup");
   // put your setup code here, to run once:
   float SpeedOfSoundsMPS;
   float floatSpeedOfSoundCMPMS = SpeedOfSoundsMPS * 100 / 1000000;
@@ -465,23 +492,17 @@ void setup()
   Serial.print(floatLitersPerCm);
   pinMode(TRIGGER, OUTPUT);
   pinMode(ECHO, INPUT_PULLUP);
-  WiFi.config(ip, gateway, subnet);
-  WiFi.begin(ssid, password);
-  Serial.print("Connecting to WiFi:");
-  while (WiFi.status() != WL_CONNECTED)
-  {
-    Serial.print(".");
-    delay(500);
+
+  if (WiFi.status() == WL_CONNECTED) {
+    WiFi.config(ip, gateway, subnet);
+    Serial.print("\nJoffre  CODER PATH WEB SERVER ESP8266 INICIANDO....");
+    server.on("/", handle_OnConnect);
+    server.on("/tankStatus", getTankStatus);
+    server.on("/ledon", handle_ledon);
+    server.on("/ledoff", handle_ledoff);
+    server.onNotFound(handle_NotFound);
+    server.begin();
   }
-
-  Serial.print("\nJoffre  CODER PATH WEB SERVER ESP8266 INICIANDO....");
-  server.on("/", handle_OnConnect);
-  server.on("/tankStatus", getTankStatus);
-  server.on("/ledon", handle_ledon);
-  server.on("/ledoff", handle_ledoff);
-  server.onNotFound(handle_NotFound);
-
-  server.begin();
 
   // nuevo
 
@@ -499,21 +520,14 @@ void setup()
   }
 
   // Connect to Wi-Fi network with SSID and password
-  Serial.print("Connecting to ");
-  // Serial.println(ssid);
-  WiFi.begin(ssid, password);
 
-  while (WiFi.status() != WL_CONNECTED)
-  {
-    delay(500);
-    Serial.print(".");
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("");
+    Serial.println("WiFi connected.");
+    Serial.println("IP address: ");
+    Serial.println(WiFi.localIP());
+    server.begin();
   }
-  // Print local IP address and start web server
-  Serial.println("");
-  Serial.println("WiFi connected.");
-  Serial.println("IP address: ");
-  Serial.println(WiFi.localIP());
-  server.begin();
 
   // DEEP SLEEP
 
@@ -1381,13 +1395,10 @@ if ((millis() - lastTime) > timerDelay) {
   {
     delay(100);
     // We start by connecting to a WiFi network
-    Serial.print("Connecting to ");
-    Serial.println(ssid);
-    WiFi.begin(ssid, password);
-    while (WiFi.status() != WL_CONNECTED)
-    {
-      delay(500);
-      Serial.print(".");
+    // Usar la red ya conectada
+    if (WiFi.status() != WL_CONNECTED) {
+      Serial.println("No hay WiFi disponible para MQTT");
+      return;
     }
     randomSeed(micros());
     Serial.println("");
@@ -1586,21 +1597,12 @@ if ((millis() - lastTime) > timerDelay) {
 
     delay(10);
     // We start by connecting to a WiFi network
-    Serial.println();
-    Serial.print("Connecting to ");
-    Serial.println(ssid);
-
-    WiFi.mode(WIFI_STA);
-    WiFi.begin(ssid, password);
-
-    while (WiFi.status() != WL_CONNECTED)
-    {
-      delay(500);
-      Serial.print(".");
+    // Usar la red ya conectada
+    if (WiFi.status() != WL_CONNECTED) {
+      Serial.println("No hay WiFi disponible para MQTT");
+      return;
     }
-
     randomSeed(micros());
-
     Serial.println("");
     Serial.println("WiFi connected");
     Serial.println("IP address: ");

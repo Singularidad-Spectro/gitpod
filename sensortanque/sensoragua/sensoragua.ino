@@ -52,13 +52,61 @@
 #define WHATABOT_PLATFORM "whatsapp"
 WiFiManager wifiManager;
 WhatabotAPIClient whatabotClient(WHATABOT_API_KEY, WHATABOT_CHAT_ID, WHATABOT_PLATFORM);
-#define AP_SSID "CONSTIJOFF"
-#define AP_PASS "@2022Joy"
+// Estructura para manejar múltiples redes WiFi
+struct WiFiRed {
+  const char* ssid;
+  const char* password;
+};
+
+// Lista de redes WiFi disponibles
+WiFiRed redes[] = {
+  {"CONSTIJOFF-5G", "@2022Joy"},
+  {"CONSTIJOFF_plus", "@2022Joy"},
+  {"CONSTIJOFF", "@2022Joy"},
+    {"Joffre", "1983joffre"},
+  {"MILASALAS2025", "alisito2025"}  // Esta red se intentará conectar y también se usará como AP si falla todo
+};
+
+// La última red del array se usará como AP en caso de fallo
+const int numRedes = sizeof(redes) / sizeof(redes[0]);
+#define AP_SSID (redes[numRedes-1].ssid)
+#define AP_PASS (redes[numRedes-1].password)
+String ssid_conectado = "";
+
 /****************PIN Definitionz************/
 
 #define TRIGGER 2
 #define ECHO 4
+
+/***tanque de agua */
+
+/************ PINES ************/
+// Pin analógico del NodeMCU
+#define LEVEL_SENSOR_T A0   // Amarillo del sensor -> divisor resistivo -> A0
+
+// Pines ultrasónicos (si usas el sensor extra tipo HC-SR04)
+#define TRIGGER_T D6
+#define ECHO_T    D7
+
+/************ VARIABLES ************/
+//int intPortValue = 0;
+//float floatLevelVolts = 0.0;
+//float floatLevelCm = 0.0;
+//int intLevelPercent = 0;
+//int intVolume = 0;
+
+// Ajusta según tu divisor resistivo y tanque
+//float floatCmPerVolt = 100.0;     // Ejemplo: calibrar cm por volt
+//float floatCapacityCm = 200.0;    // Altura total en cm
+//float floatLitersPerCm = 3.75;    // Para tanque de 750 L / 200 cm altura
 #define LEVEL_SENSOR 34
+
+const float Rshunt = 150.0;   // resistencia en ohm
+const float I_min = 0.0;      // corriente mínima en mA (tanque vacío)
+const float I_max = 0.72;     // corriente máxima en mA (tanque lleno)
+const float TankCapacity = 750.0; // litros
+
+
 
 
 /// comunicacion con arduino leonardo
@@ -70,7 +118,7 @@ WhatabotAPIClient whatabotClient(WHATABOT_API_KEY, WHATABOT_CHAT_ID, WHATABOT_PL
 
 ///// reloj
 
-   const long utcOffsetInSeconds = 3600;                                                                        // 3600 = western europe winter time - 7200 = western europe summer time
+   const long utcOffsetInSeconds = -18000;                                                                        // 3600 = western europe winter time - 7200 = western europe summer time
    char daysOfTheWeek[7][12] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
 
 
@@ -239,8 +287,50 @@ int intLevel = 0;
 float floatLitersPerCm = 0.0;
 float floatSpeedOfSoundCMPMS = 0.0;
 
-const char *ssid = "CONSTIJOFF";
-const char *password = "@2022Joy";
+
+
+// Las configuraciones de red se manejan desde el array redes[]
+
+void conectarWiFiDinamico() {
+  WiFi.mode(WIFI_STA);
+  
+  // Intentar conectar a cada red en el array (incluyendo la última)
+  for(int i = 0; i < numRedes; i++) {
+    Serial.print("\nIntentando conectar a ");
+    Serial.println(redes[i].ssid);
+    
+    WiFi.begin(redes[i].ssid, redes[i].password);
+    int intentos = 0;
+    
+    while (WiFi.status() != WL_CONNECTED && intentos < 20) {
+      delay(500);
+      Serial.print(".");
+      intentos++;
+    }
+    
+    if (WiFi.status() == WL_CONNECTED) {
+      Serial.println("\nConexión exitosa");
+      Serial.print("IP local: ");
+      Serial.println(WiFi.localIP());
+      ssid_conectado = redes[i].ssid;
+      return;
+    }
+    
+    Serial.println("\nNo se pudo conectar. Intentando siguiente red...");
+    WiFi.disconnect();
+    delay(1000);
+  }
+
+  // Si no se pudo conectar a ninguna red, iniciar modo AP
+  Serial.println("\nNo se pudo conectar a ninguna red, iniciando modo AP...");
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP(AP_SSID, AP_PASS);
+  Serial.print("AP iniciado. IP: ");
+  Serial.println(WiFi.softAPIP());
+  ssid_conectado = String(AP_SSID) + " (AP)";
+  Serial.print("SSID en modo AP: ");
+  Serial.println(ssid_conectado);
+}
 
 const int SerialSpeed = 115200;
 const int tempAvg = 20;
@@ -296,7 +386,8 @@ String apiKeycallmebot = "6550669";
 void sendMessageCallmebot(String message){
 
   // Data to send with HTTP POST
-  String url = "http://api.callmebot.com/whatsapp.php?phone=" + phoneNumbercallmebot + "&apikey=" + apiKeycallmebot + "&text=" + urlEncode(message);
+  String mensaje_final = message + "\nSSID conectado: " + ssid_conectado;
+  String url = "http://api.callmebot.com/whatsapp.php?phone=" + phoneNumbercallmebot + "&apikey=" + apiKeycallmebot + "&text=" + urlEncode(mensaje_final);
             //    "https://api.callmebot.com/whatsapp.php?phone=51989168761&text=This+is+a+test&apikey=6550669"
   WiFiClient client;    
   HTTPClient http;
@@ -326,7 +417,8 @@ void sendMessage(String message)
 {
 
   // Data to send with HTTP POST
-  String url = "http://api.callmebot.com/whatsapp.php?phone=" + phoneNumber + "&apikey=" + apiKey + "&text=" + urlEncode(message);
+  String mensaje_final = message + "\nSSID conectado: " + ssid_conectado;
+  String url = "http://api.callmebot.com/whatsapp.php?phone=" + phoneNumber + "&apikey=" + apiKey + "&text=" + urlEncode(mensaje_final);
   WiFiClient client;
   HTTPClient http;
   http.begin(client, url);
@@ -417,31 +509,15 @@ void setup()
    Serial.begin (9600);
    Serial.println ();
    Serial.println ();
-   WiFi.begin (ssid, password);
-
-   while (WiFi.status() != WL_CONNECTED ) 
-      {
-      delay (500);
-      Serial.print (".");
-      }
-   Serial.print ("connection with ");
-   Serial.println (ssid);  
-   Serial.println ("-------------------------------"); 
-   
-   timeClient.begin();
-   timeClient.update ();
-   Serial.print ("internet server time: ");   
-   Serial.println(timeClient.getFormattedTime());
-
-   hh = timeClient.getHours ();
-   mm = timeClient.getMinutes ();
-   ss = timeClient.getSeconds ();
-
-
- 
-
-  //  wifiManager.autoConnect(AP_SSID, AP_PASS);
-  wifiManager.autoConnect(ssid, password);
+  conectarWiFiDinamico();
+  Serial.println ("-------------------------------"); 
+  timeClient.begin();
+  timeClient.update ();
+  Serial.print ("internet server time: ");   
+  Serial.println(timeClient.getFormattedTime());
+  hh = timeClient.getHours ();
+  mm = timeClient.getMinutes ();
+  ss = timeClient.getSeconds ();
   // put your setup code here, to run once:
   float SpeedOfSoundsMPS;
   float floatSpeedOfSoundCMPMS = SpeedOfSoundsMPS * 100 / 1000000;
@@ -455,32 +531,57 @@ void setup()
   whatabotClient.onMessageReceived(onMessageReceived);
   whatabotClient.onServerResponseReceived(onServerResponseReceived);
 
+
+
+
   //tanque de agua
+ pinMode(TRIGGER_T, OUTPUT);
+  pinMode(ECHO_T, INPUT);
+  digitalWrite(TRIGGER_T, LOW);
+
+  Serial.println("Sistema de nivel iniciado");
+  int adcVal = analogRead(LEVEL_SENSOR_T);
+  float Vadc = (adcVal * 3.3) / 4095.0;
+  float I_mA = (Vadc / Rshunt) * 1000.0;
+
+  float Level_percent = (I_mA - I_min) / (I_max - I_min) * 100.0;
+  if (Level_percent < 0) Level_percent = 0;
+  if (Level_percent > 100) Level_percent = 100;
+
+  float Volume_L = (Level_percent / 100.0) * TankCapacity;
+
+ 
+
+
+
+
+
+
   Serial.setTimeout(timeoutTime);
+  Serial.println("------------------");
+  Serial.print("ADC: "); Serial.println(adcVal);
+  Serial.print("Vadc: "); Serial.println(Vadc, 3);
+  Serial.print("I_mA: "); Serial.println(I_mA, 3);
+  Serial.print("Nivel: "); Serial.print(Level_percent, 1); Serial.println(" %");
+  Serial.print("Volumen: "); Serial.print(Volume_L, 1); Serial.println(" L");
   Serial.print("Capacity: ");
   Serial.print(intCapacity);
   Serial.print("Speed of sound Cm per uS: ");
   Serial.print(floatSpeedOfSoundCMPMS);
   Serial.print("Liters per cm: ");
   Serial.print(floatLitersPerCm);
+
+
   pinMode(TRIGGER, OUTPUT);
   pinMode(ECHO, INPUT_PULLUP);
   WiFi.config(ip, gateway, subnet);
-  WiFi.begin(ssid, password);
-  Serial.print("Connecting to WiFi:");
-  while (WiFi.status() != WL_CONNECTED)
-  {
-    Serial.print(".");
-    delay(500);
-  }
-
+  conectarWiFiDinamico();
   Serial.print("\nJoffre  CODER PATH WEB SERVER ESP8266 INICIANDO....");
   server.on("/", handle_OnConnect);
   server.on("/tankStatus", getTankStatus);
   server.on("/ledon", handle_ledon);
   server.on("/ledoff", handle_ledoff);
   server.onNotFound(handle_NotFound);
-
   server.begin();
 
   // nuevo
@@ -493,24 +594,12 @@ void setup()
   digitalWrite(output4, LOW);
 
   // Configures static IP address
-  if (!WiFi.config(ip, gateway, subnet))
-  {
+  if (!WiFi.config(ip, gateway, subnet)) {
     Serial.println("STA Failed to configure");
   }
-
-  // Connect to Wi-Fi network with SSID and password
-  Serial.print("Connecting to ");
-  // Serial.println(ssid);
-  WiFi.begin(ssid, password);
-
-  while (WiFi.status() != WL_CONNECTED)
-  {
-    delay(500);
-    Serial.print(".");
-  }
-  // Print local IP address and start web server
+  conectarWiFiDinamico();
   Serial.println("");
-  Serial.println("WiFi connected.");
+  Serial.println("WiFi conectado o AP iniciado.");
   Serial.println("IP address: ");
   Serial.println(WiFi.localIP());
   server.begin();
@@ -609,7 +698,12 @@ void setup()
   message.html.transfer_encoding = Content_Transfer_Encoding::enc_7bit;*/
 
   // Send raw text message
-  String textMsg = "Hello World! - Mensaje enviado desde el microcontrolador esp8266 - lo lograste!!!";
+String textMsg = String("Hello World! - Mensaje enviado desde el microcontrolador esp8266 - lo lograste!!! ") +
+  " ADC: " + String(adcVal) +
+  " Vadc: " + String(Vadc) +
+  " I_mA: " + String(I_mA) +
+  " Nivel: " + String(Level_percent) + " % " +
+  " Volumen: " + String(Volume_L) + " L";
   message.text.content = textMsg.c_str();
   message.text.charSet = "us-ascii";
   message.text.transfer_encoding = Content_Transfer_Encoding::enc_7bit;
@@ -717,6 +811,14 @@ if ((millis() - lastTime) > timerDelay) {
                }
             }
          }
+
+           // 🔹 Sincronizar con NTP al inicio de cada minuto
+    if (ss == 0) {
+      timeClient.update();
+      hh = timeClient.getHours();
+      mm = timeClient.getMinutes();
+      ss = timeClient.getSeconds();
+    }
           
       // pre-compute hand degrees, x & y coords for a fast screen update
       sdeg = ss*6;                                                                     // 0-59 -> 0-354
@@ -758,7 +860,7 @@ if ((millis() - lastTime) > timerDelay) {
   // tank status
 
   /*RANGE 0.6V - 3.0V : 12 Bits 0 -4095 : 0 - 2 M*/
-  intPortValue = analogRead(LEVEL_SENSOR);
+  intPortValue = analogRead(LEVEL_SENSOR_T);
   Serial.println("----------------");
   Serial.print("intPortValue: ");
   Serial.println(intPortValue);
@@ -790,17 +892,17 @@ if ((millis() - lastTime) > timerDelay) {
 
   /**CHECK DISTANCE***/
 
-  digitalWrite(TRIGGER, HIGH);
+  digitalWrite(TRIGGER_T, HIGH);
   delayMicroseconds(15);
-  digitalWrite(TRIGGER, LOW);
-  intTime = pulseIn(ECHO, HIGH);
+  digitalWrite(TRIGGER_T, LOW);
+  intTime = pulseIn(ECHO_T, HIGH);
   intTime = intTime / 2;
   intDistance = intTime * floatSpeedOfSoundCMPMS;
   Serial.print("/n Distance: ");
   Serial.print(intDistance);
   if (floatLevelVolts != 0)
   {
-    /*     intLevelCm = intEmpty - intDistance;
+         intLevelCm = intEmpty - intDistance;
      if(intLevelCm < 0)
        intLevelCm = 0;
      if(intLevelCm > intCapacity)
@@ -811,7 +913,7 @@ if ((millis() - lastTime) > timerDelay) {
      Serial.print("Nivel: "); Serial.print(intLevel); Serial.print("%");
      intVolume=intLevelCm*floatLitersPerCm;
      Serial.print("Volume: "); Serial.print(intVolume);
-   */
+   
   }
   else
   { // When intDistance is 0 is a sensor error or disconnected
@@ -1048,7 +1150,165 @@ if ((millis() - lastTime) > timerDelay) {
     client.publish("device/temp", msg);
   }
 
+
+// ====================== MENSAJES PROGRAMADOS ======================
+
+// variable estática para evitar reenvíos en el mismo minuto
+static int lastSentHour = -1;
+static int lastSentMinute = -1;
+
+// cuando sea la hora exacta (en minutos == 0)
+if (mm == 0 && (hh == 0 || hh == 9 || hh == 12 || hh == 16 || hh == 21)) {
+
+  // verificamos que no se haya enviado en este mismo minuto
+  if (lastSentHour != hh || lastSentMinute != mm) {
+
+    String mensaje = "Alerta automática: son las " + String(hh) + ":00 horas.";
+
+    // -------- CallMeBot (WhatsApp) --------
+ // CALL ME BOT
+   sendMessageCallmebot(mensaje + " " + WiFi.macAddress() );
+
+ // --------enviar correo --------
+
+enviarCorreo(mensaje + " " + WiFi.macAddress() );
+
+    // marcar que ya se envió en esta hora:minuto
+    lastSentHour = hh;
+    lastSentMinute = mm;
+  }
 }
+
+
+// ====================== ALERTAS TANQUE DE AGUA ======================
+
+// variable estática para evitar reenvíos en el mismo nivel
+static int lastTankLevel = -1;
+
+  // función que retorna distancia en cm desde sensor
+//int nivel = map(intLevelPercent, intEmpty, intFull, 0, 100);  // 0% = vacío, 100% = lleno
+int nivel = map(intLevelPercent, intEmpty, intFull, 0, 100);  // 0% = vacío, 100% = lleno
+// limitar nivel entre 0 y 100
+nivel = constrain(nivel, 0, 100);
+
+// revisar solo si cambió de tramo (25, 50, 75, 100)
+if ((nivel >= 100 || nivel >= 75 || nivel >= 50 || nivel >= 25) && nivel != lastTankLevel) {
+
+  String mensajetanque = "Tanque de agua al " + String(nivel) + "%"   +" Con un volumen: "+intVolume +" litros";
+
+   // -------- CallMeBot (WhatsApp) --------
+ // CALL ME BOT
+   sendMessageCallmebot(mensajetanque + " " + WiFi.macAddress() );
+
+ // --------enviar correo --------
+
+enviarCorreo(mensajetanque + " " + WiFi.macAddress() );
+
+
+  // actualizar nivel enviado
+  lastTankLevel = nivel;
+}
+
+
+
+}
+
+
+
+void enviarCorreo(String mensaje){
+
+  // GMAIL SMPT ///
+
+  Serial.println();
+  Serial.print("Connected with IP: ");
+  Serial.println(WiFi.localIP());
+  Serial.println();
+
+  /*  Set the network reconnection option */
+  MailClient.networkReconnect(true);
+
+  /** Enable the debug via Serial port
+   * 0 for no debugging
+   * 1 for basic level debugging
+   *
+   * Debug port can be changed via ESP_MAIL_DEFAULT_DEBUG_PORT in ESP_Mail_FS.h
+   */
+  smtp.debug(1);
+
+  /* Set the callback function to get the sending results */
+  smtp.callback(smtpCallback);
+
+  /* Declare the Session_Config for user defined session credentials */
+  Session_Config config;
+
+  /* Set the session config */
+  config.server.host_name = SMTP_HOST;
+  config.server.port = SMTP_PORT;
+  config.login.email = AUTHOR_EMAIL;
+  config.login.password = AUTHOR_PASSWORD;
+  config.login.user_domain = "";
+
+  /*
+  Set the NTP config time
+  For times east of the Prime Meridian use 0-12
+  For times west of the Prime Meridian add 12 to the offset.
+  Ex. American/Denver GMT would be -6. 6 + 12 = 18
+  See https://en.wikipedia.org/wiki/Time_zone for a list of the GMT/UTC timezone offsets
+  */
+  config.time.ntp_server = F("pool.ntp.org,time.nist.gov");
+  config.time.gmt_offset = 3;
+  config.time.day_light_offset = 0;
+
+  /* Declare the message class */
+  SMTP_Message message;
+
+  /* Set the message headers */
+  message.sender.name = F("ESP8266 - CODER PATH");
+  message.sender.email = AUTHOR_EMAIL;
+  message.subject = F("ESP8266 Test Email enviado desde ESP8266");
+  message.addRecipient(F("Joffre"), RECIPIENT_EMAIL);
+
+  /*Send HTML message*/
+  /*String htmlMsg = "<div style=\"color:#2f4468;\"><h1>Hello World!</h1><p>- Sent from ESP board</p></div>";
+  message.html.content = htmlMsg.c_str();
+  message.html.content = htmlMsg.c_str();
+  message.text.charSet = "us-ascii";
+  message.html.transfer_encoding = Content_Transfer_Encoding::enc_7bit;*/
+
+  // Send raw text message
+  String textMsg = mensaje + "\nSSID conectado: " + ssid_conectado;
+  message.text.content = textMsg.c_str();
+  message.text.charSet = "us-ascii";
+  message.text.transfer_encoding = Content_Transfer_Encoding::enc_7bit;
+
+  message.priority = esp_mail_smtp_priority::esp_mail_smtp_priority_low;
+  message.response.notify = esp_mail_smtp_notify_success | esp_mail_smtp_notify_failure | esp_mail_smtp_notify_delay;
+
+  /* Connect to the server */
+  if (!smtp.connect(&config))
+  {
+    ESP_MAIL_PRINTF("Connection error, Status Code: %d, Error Code: %d, Reason: %s", smtp.statusCode(), smtp.errorCode(), smtp.errorReason().c_str());
+    return;
+  }
+
+  if (!smtp.isLoggedIn())
+  {
+    Serial.println("\nNot yet logged in.");
+  }
+  else
+  {
+    if (smtp.isAuthenticated())
+      Serial.println("\nSuccessfully logged in.");
+    else
+      Serial.println("\nConnected with no Auth.");
+  }
+
+  /* Start sending Email and close the session */
+  if (!MailClient.sendMail(&smtp, &message))
+    ESP_MAIL_PRINTF("Error, Status Code: %d, Error Code: %d, Reason: %s", smtp.statusCode(), smtp.errorCode(), smtp.errorReason().c_str());
+
+}
+
 
   void getTankStatus()
   {
@@ -1382,13 +1642,8 @@ if ((millis() - lastTime) > timerDelay) {
     delay(100);
     // We start by connecting to a WiFi network
     Serial.print("Connecting to ");
-    Serial.println(ssid);
-    WiFi.begin(ssid, password);
-    while (WiFi.status() != WL_CONNECTED)
-    {
-      delay(500);
-      Serial.print(".");
-    }
+    Serial.println(redes[0].ssid);
+    conectarWiFiDinamico();
     randomSeed(micros());
     Serial.println("");
     Serial.println("WiFi connected");
@@ -1588,16 +1843,9 @@ if ((millis() - lastTime) > timerDelay) {
     // We start by connecting to a WiFi network
     Serial.println();
     Serial.print("Connecting to ");
-    Serial.println(ssid);
+    Serial.println(redes[0].ssid);
 
-    WiFi.mode(WIFI_STA);
-    WiFi.begin(ssid, password);
-
-    while (WiFi.status() != WL_CONNECTED)
-    {
-      delay(500);
-      Serial.print(".");
-    }
+    conectarWiFiDinamico();
 
     randomSeed(micros());
 
