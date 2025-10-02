@@ -25,8 +25,10 @@
 // #include <WiFi.h>
 // #include <WebServer.h>
 #include <ESP_Mail_Client.h>
+// #include <HTTPClient.h>
 #include <ESP8266HTTPClient.h>
 #include <WiFiClient.h>
+#include <ESP_Mail_Client.h>
 
 #include <UrlEncode.h>
 
@@ -43,104 +45,78 @@
 
 
 
-// ================== CONFIGURACIÓN DE RED ==================
+/****************what bot **********/
 
-// --- WiFi ---
-struct WiFiRed {
-  const char* ssid;
-  const char* password;
-};
-
-WiFiRed redes[] = {
-  {"CONSTIJOFF", "@2022Joy"},
-  {"CONSTIJOFF-5G", "@2022Joy"},
-  {"CONSTIJOFF_plus", "@2022Joy"},
-  {"MILASALAS2025", "alisito2025"},
-  {"MILASALAS2025_AP", "alisito2025"}
-};
-const int numRedes = sizeof(redes) / sizeof(redes[0]);
-String ssid_conectado = "";
-
-// --- WhatsApp Bot ---
 #define WHATABOT_API_KEY "37fee9bc-ffc4-4ac9-964a"
 #define WHATABOT_CHAT_ID "51989168761"
 #define WHATABOT_PLATFORM "whatsapp"
 WiFiManager wifiManager;
 WhatabotAPIClient whatabotClient(WHATABOT_API_KEY, WHATABOT_CHAT_ID, WHATABOT_PLATFORM);
-// ================== CONFIGURACIÓN DE SENSORES ==================
+#define AP_SSID "MILASALAS2025"
+#define AP_PASS "alisito2025"
+/****************PIN Definitionz************/
 
-// --- Sensor ultrasónico ---
 #define TRIGGER 2
 #define ECHO 4
-
-// --- Sensor de nivel ---
 #define LEVEL_SENSOR 34
-#define LEVEL_SENSOR_T A0
 
-// --- Sensor DHT11 ---
-#define DHTPIN 2  // GPIO2 o D4
-#define DHTTYPE DHT11
-DHT dht(DHTPIN, DHTTYPE);
 
-// --- Comunicación con Arduino Leonardo ---
+/// comunicacion con arduino leonardo
+
 #define RXp2 16
 #define TXp2 17
 
 
 
-// ================== CONFIGURACIÓN DE RELOJ ==================
+///// reloj
 
-const long utcOffsetInSeconds = -18000;  // UTC-5 para Perú
-char daysOfTheWeek[7][12] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
-WiFiUDP ntpUDP;
-NTPClient timeClient(ntpUDP, "pool.ntp.org", utcOffsetInSeconds);
+   const long utcOffsetInSeconds = 3600;                                                                        // 3600 = western europe winter time - 7200 = western europe summer time
+   char daysOfTheWeek[7][12] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
 
 
-// ================== CONFIGURACIÓN DE PANTALLA ==================
-
-// --- Pines de la pantalla ---
-#define TFT_DC  D2
-#define TFT_CS  D8
-#define DEG2RAD 0.0174532925
-
-// --- Colores ---
-#define BLACK      0x0000
-#define BLUE       0x001F
-#define RED        0xF800
-#define GREEN      0x07E0
-#define CYAN       0x07FF
-#define MAGENTA    0xF81F
-#define YELLOW     0xFFE0
-#define WHITE      0xFFFF
-#define ORANGE     0xFBE0
-#define GREY       0x84B5
-#define BORDEAUX   0xA000
-
-// --- Instancia de pantalla ---
-Adafruit_GC9A01A tft(TFT_CS, TFT_DC);
+   #define TFT_DC  D2
+   #define TFT_CS  D8
+   #define DEG2RAD 0.0174532925   
+   
+// some extra colors
+   #define BLACK      0x0000
+   #define BLUE       0x001F
+   #define RED        0xF800
+   #define GREEN      0x07E0
+   #define CYAN       0x07FF
+   #define MAGENTA    0xF81F
+   #define YELLOW     0xFFE0
+   #define WHITE      0xFFFF
+   #define ORANGE     0xFBE0
+   #define GREY       0x84B5
+   #define BORDEAUX   0xA000
 
 
 
-// ================== CONFIGURACIÓN DE CORREO ==================
-
-// --- Configuración SMTP ---
-#define SMTP_HOST "smtp.gmail.com"
-#define SMTP_PORT 465
-#define AUTHOR_EMAIL "joffre.hermosilla@gmail.com"
-#define AUTHOR_PASSWORD "jtmn khfe nldj gsgp"
-#define RECIPIENT_EMAIL "alucardaywalker@hotmail.com"
-
-// --- Variables de correo ---
+/****************Mail************/
+const char *user_base64 = "joffre.hermosilla@gmail.com";
+const char *user_password_base64 = "1983joffre";
 const char *from_email = "MAIL From: <joffre.hermosilla@gmail.com>";
 const char *to_email = "RCPT TO: <alucardaywalker@hotmail.com>";
 uint32_t TIEMPO_DeepSleep = 90e6;
 int contMail = 0;
 
-// --- Funciones de correo ---
+/****************EMAIL************/
 byte sendEmail(int x);
 byte eRcv(WiFiClientSecure client);
 
-// --- Sesión SMTP ---
+/** The smtp host name e.g. smtp.gmail.com for GMail or smtp.office365.com for Outlook or smtp.mail.yahoo.com */
+#define SMTP_HOST "smtp.gmail.com"
+#define SMTP_PORT 465
+
+/* The sign in credentials */
+#define AUTHOR_EMAIL "joffre.hermosilla@gmail.com"
+#define AUTHOR_PASSWORD "jtmn khfe nldj gsgp"
+
+/* Recipient's email*/
+#define RECIPIENT_EMAIL "alucardaywalker@hotmail.com"
+
+/* Declare the global used SMTPSession object for SMTP transport */
 SMTPSession smtp;
 
 // Setup for DHT======================================
@@ -152,17 +128,17 @@ SMTPSession smtp;
 // #define DHTTYPE    DHT21     // DHT 21 (AM2301)
 DHT dht(DHTPIN, DHTTYPE);
 
-// ================== VARIABLES DE SENSORES ==================
-
-// --- Variables de temperatura y humedad ---
+// current temperature & humidity, updated in loop()
 float t = 0.0;
 float h = 0.0;
 
-// ================== CONFIGURACIÓN MQTT ==================
-
-// --- Tópicos MQTT ---
+// declare topic for publish message
 const char *topic_pub = "ESP_Pub";
+// declare topic for subscribe message
 const char *topic_sub = "ESP_Sub";
+
+// Update these with values suitable for your network.
+
 const char *mqtt_server = "broker.mqtt-dashboard.com";
 // const char *mqtt_server = "2001:41d0:1:925e::1";
 //  for output
@@ -173,24 +149,29 @@ int lamp3 = 4;  // lamp for stop indicator D2
 
 
 
-// ================== CONFIGURACIÓN ESP-NOW ==================
+//configuracion ESP-NOW
+// REPLACE WITH RECEIVER MAC Address
+//3C:84:27:28:FA:F8 
 
-// --- Dirección MAC del receptor ---
+
 uint8_t broadcastAddress[] = {0x3C, 0x84, 0x27, 0x28, 0xFA, 0xF8};
 
-// --- Estructura de mensaje ESP-NOW ---
+// Structure example to send data
+// Must match the receiver structure
 typedef struct struct_message {
   char a[32];
   int b;
   float c;
   String d;
   bool e;
-} struct_message;
+}
+ struct_message;
 
-// --- Variables ESP-NOW ---
+// Create a struct_message called myData
 struct_message myData;
-unsigned long lastTime = 0;
-unsigned long timerDelay = 2000;  // Tiempo entre envíos en ms
+
+unsigned long lastTime = 0;  
+unsigned long timerDelay = 2000;  // send readings timer
 
 // Callback when data is sent
 void OnDataSent(uint8_t *mac_addr, uint8_t sendStatus) {

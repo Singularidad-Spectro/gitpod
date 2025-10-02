@@ -1,0 +1,40 @@
+
+Aquí tienes el esquema de conexiones para tu sistema híbrido de alimentación (panel solar + pila de litio):
+
+Esquema de Conexión
+Panel Solar (12 V)
+
+Alimenta directamente el sensor de nivel.
+No conecta al ESP8266.
+Sensor de Nivel (3 hilos)
+
+Rojo → +12 V del panel solar.
+Verde/Negro → GND del panel solar.
+Amarillo → Señal analógica.
+Resistencia Shunt
+
+Un extremo a Amarillo (señal del sensor).
+Otro extremo a GND (del panel solar y ESP8266).
+Nodo entre Amarillo y resistencia → A0 del ESP8266.
+ESP8266 NodeMCU
+
+Alimentado por pila de litio (3.7 V regulada a 3.3 V).
+GND de la pila de litio conectada a GND del panel solar y sensor (masa común).
+A0 → Nodo entre Amarillo y resistencia shunt.
+Arduino Leonardo y Servos
+
+Alimentados por fuente propia (5 V).
+Comunicación serial con ESP8266 a través del HM Level Converter.
+HM Level Converter
+
+HV → 5 V Leonardo.
+LV → 3.3 V ESP8266.
+GND → Masa común (Leonardo, ESP8266, sensor).
+HV1 ↔ LV1: TX Leonardo → RX ESP8266.
+HV2 ↔ LV2: RX Leonardo ← TX ESP8266.
+Diagrama textual
+Resumen de seguridad
+Nunca conectes +12 V al ESP8266.
+Masa común entre todos los sistemas.
+El ESP8266 solo recibe la señal analógica adaptada por la resistencia.
+El HM Level Converter protege la comunicación serial entre ESP8266 y Leonardo.
