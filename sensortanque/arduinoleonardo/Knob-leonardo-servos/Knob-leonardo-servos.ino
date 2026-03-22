@@ -6,7 +6,8 @@ String inputString = "";
 boolean stringComplete = false;
 
 void setup() {
-  Serial.begin(9600);  // Iniciar comunicación serial
+  Serial.begin(9600);    // Iniciar comunicación con PC (Monitor Serial USB)
+  Serial1.begin(9600);   // Iniciar comunicación con ESP8266 (Pines 0 RX y 1 TX)
   servoHorario.attach(9);      // Servo horario en pin 9
   servoInclinacion.attach(2);   // Servo inclinación en pin 2
   
@@ -18,6 +19,16 @@ void setup() {
 }
 
 void loop() {
+  // Procesar comandos desde ESP8266 (Serial1)
+  while (Serial1.available()) {
+    char inChar = (char)Serial1.read();
+    if (inChar == '\n') {
+      stringComplete = true;
+    } else {
+      inputString += inChar;
+    }
+  }
+
   // Procesar comando cuando esté completo
   if (stringComplete) {
     processCommand(inputString);
@@ -26,17 +37,6 @@ void loop() {
   }
 }
 
-// Evento de recepción serial
-void serialEvent() {
-  while (Serial.available()) {
-    char inChar = (char)Serial.read();
-    if (inChar == '\n') {
-      stringComplete = true;
-    } else {
-      inputString += inChar;
-    }
-  }
-}
 
 // Procesar comandos recibidos
 void processCommand(String command) {

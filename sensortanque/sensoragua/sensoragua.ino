@@ -1,52 +1,83 @@
+#define DISABLE_SD 1
+#define ESP_MAIL_DISABLE_SD 1
+#include "Adafruit_GC9A01A.h"
+#include "Adafruit_GFX.h"
 #include "SPI.h"
-   #include "Adafruit_GFX.h"
-   #include "Adafruit_GC9A01A.h"
-   #include <NTPClient.h>
+#include <NTPClient.h>
 
-   #include <WiFiUdp.h>
+#include <WiFiUdp.h>
 
+// --- EYE ASSETS SELECTION ---
+// Sólo habilitamos 2 estilos porque cargar los 4 excede el límite físico
+// de 1MB de memoria Flash del ESP8266 (irom0.text will not fit in region).
+#define EYE_STYLE_DRAGON
+//#define EYE_STYLE_GOAT
+#define EYE_STYLE_DEFAULT
+//#define EYE_STYLE_NO_SCLERA
 
+#include "dragonEye.h"
+//#include "goatEye.h"
+#include "defaultEye.h"
+//#include "noScleraEye.h"
 
 // Using ESP8266
-// using library DHT sensor Library by Adafruit Version 1.4.3
-// This program for send temp, humidity to mqtt broker
+// This program for monitoring and tank level
 // Receive message from mqtt broker to turn on device
-// Reference GPIO  https://randomnerdtutorials.com/esp8266-pinout-reference-gpios/
+// Reference GPIO
+// https://randomnerdtutorials.com/esp8266-pinout-reference-gpios/
 
 /*********************LIBRARY***************/
 #include <Arduino.h>
-#include <ESP8266WiFi.h>
-#include <ESP8266WebServer.h>
 #include <ArduinoJson.h>
 #include <ArduinoOTA.h>
-#include <ESP8266mDNS.h>
-// #include <WiFi.h>
-// #include <WebServer.h>
-#include <ESP_Mail_Client.h>
-// #include <HTTPClient.h>
+#include <ESP8266WebServer.h>
+#include <ESP8266WiFi.h>
+
+#define ESP_MAIL_DISABLE_SD 1
 #include <ESP8266HTTPClient.h>
-#include <WiFiClient.h>
 #include <ESP_Mail_Client.h>
-
 #include <UrlEncode.h>
+#include <WiFiClient.h>
+#include <WiFiClientSecure.h>
 
-#include <WhatabotAPIClient.h>
+// #include <WhatabotAPIClient.h>
 #include <WiFiManager.h>
 // Library for MQTT:
 #include <PubSubClient.h>
 
-//ESP-NOW
+// ESP-NOW
 #include <espnow.h>
 
 #include <SoftwareSerial.h>
-#define RXp2 16  // D0 en NodeMCU
-#define TXp2 17  // D1 en NodeMCU
+
+// --- PROTOTYPES ---
+void conectarWiFiDinamico();
+void sendMessageMeta(int perc, int lit, String solar, String hora, int bat);
+void createDial();
+void updateServoHorario();
+void updateServoInclinacion();
+void gmail_configuration();
+void enviarCorreo(String mensaje);
+void handle_OnConnect();
+void getTankStatus();
+void handle_ledon();
+void handle_ledoff();
+void handle_NotFound();
+String updateWebpage(uint8_t LEDstatus);
+void setup_wifi();
+void callback(char *topic, byte *payload, unsigned int length);
+void reconnect();
+void check_stat();
+void setup_wifi_mqtt();
+void callback_mqtt(char *topic, byte *payload, unsigned int length);
+void reconnect_mqtt();
+
+// --- COMUNICACIÓN CON ARDUINO LEONARDO ---
+#define RXp2 16                            // D0 en NodeMCU (Conectar a TX Pin 1 del Leonardo)
+#define TXp2 0                             // D3 en NodeMCU (Conectar a RX Pin 0 del Leonardo)
 SoftwareSerial serialLeonardo(RXp2, TXp2); // RX, TX
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, "pool.ntp.org", -18000, 60000); // UTC-5 para Perú
-
-
-
 
 /****************what bot **********/
 
@@ -54,26 +85,27 @@ NTPClient timeClient(ntpUDP, "pool.ntp.org", -18000, 60000); // UTC-5 para Perú
 #define WHATABOT_CHAT_ID "51989168761"
 #define WHATABOT_PLATFORM "whatsapp"
 WiFiManager wifiManager;
-WhatabotAPIClient whatabotClient(WHATABOT_API_KEY, WHATABOT_CHAT_ID, WHATABOT_PLATFORM);
-// Estructura para manejar múltiples redes WiFi
+// WhatabotAPIClient whatabotClient(WHATABOT_API_KEY, WHATABOT_CHAT_ID,
+// WHATABOT_PLATFORM); Estructura para manejar múltiples redes WiFi
 struct WiFiRed {
-  const char* ssid;
-  const char* password;
+  const char *ssid;
+  const char *password;
 };
 
 // Lista de redes WiFi disponibles
 WiFiRed redes[] = {
-  {"CONSTIJOFF-5G", "@2022Joy"},
-  {"CONSTIJOFF_plus", "@2022Joy"},
-  {"CONSTIJOFF", "@2022Joy"},
+    {"CONSTIJOFF-5G", "@2022Joy"},
+    {"CONSTIJOFF_plus", "@2022Joy"},
+    {"CONSTIJOFF", "@2022Joy"},
     {"Joffre", "1983joffre"},
-  {"MILASALAS2025", "alisito2025"}  // Esta red se intentará conectar y también se usará como AP si falla todo
+    {"MILASALAS2025", "alisito2025"} // Esta red se intentará conectar y también
+                                     // se usará como AP si falla todo
 };
 
 // La última red del array se usará como AP en caso de fallo
 const int numRedes = sizeof(redes) / sizeof(redes[0]);
-#define AP_SSID (redes[numRedes-1].ssid)
-#define AP_PASS (redes[numRedes-1].password)
+#define AP_SSID (redes[numRedes - 1].ssid)
+#define AP_PASS (redes[numRedes - 1].password)
 String ssid_conectado = "";
 
 /****************PIN Definitionz************/
@@ -85,32 +117,65 @@ String ssid_conectado = "";
 
 /************ PINES ************/
 // Pin analógico del NodeMCU
-#define LEVEL_SENSOR_T A0   // Amarillo del sensor -> divisor resistivo -> A0
+#define LEVEL_SENSOR_T A0 // Amarillo del sensor -> divisor resistivo -> A0
 
 // Pines ultrasónicos (si usas el sensor extra tipo HC-SR04)
-#define TRIGGER_T D6
-#define ECHO_T    D7
+#define TRIGGER_T D1 // Movido de D6 para evitar conflicto SPI
+#define ECHO_T D6    // Movido de D7 para evitar conflicto SPI
 
 /************ VARIABLES ************/
-//int intPortValue = 0;
-//float floatLevelVolts = 0.0;
-//float floatLevelCm = 0.0;
-//int intLevelPercent = 0;
-//int intVolume = 0;
+// int intPortValue = 0;
+// float floatLevelVolts = 0.0;
+// float floatLevelCm = 0.0;
+// int TANK_level_percent = 0;
+// int TANK_intVolume = 0;
 
 // Ajusta según tu divisor resistivo y tanque
-//float floatCmPerVolt = 100.0;     // Ejemplo: calibrar cm por volt
-//float floatCapacityCm = 200.0;    // Altura total en cm
-//float floatLitersPerCm = 3.75;    // Para tanque de 750 L / 200 cm altura
+// float floatCmPerVolt = 100.0;     // Ejemplo: calibrar cm por volt
+// float floatCapacityCm = 200.0;    // Altura total en cm
+// float floatLitersPerCm = 3.75;    // Para tanque de 750 L / 200 cm altura
 #define LEVEL_SENSOR 34
 
-const float Rshunt = 150.0;   // resistencia en ohm
-const float I_min = 0.0;      // corriente mínima en mA (tanque vacío)
-const float I_max = 0.72;     // corriente máxima en mA (tanque lleno)
+// Global variables for sensor data
+int adcVal = 0;
+float Vadc = 0.0;
+float I_mA = 0.0;
+float Level_percent = 0.0;
+float Volume_L = 0.0;
+int TANK_intLevel = 0;
+int TANK_intVolume = 0;
+int TANK_level_percent = 0;
+int TANK_intEmpty = 200;
+int TANK_intFull = 10;
+int intDistance = 0;
+int intTime = 0;
+float floatLevelVolts = 0.0;
+float floatLevelCm = 0.0;
+float floatCapacityCm = 200.0;
+const float floatCmPerVolt = 200.0 / 2.4;
+const int intTankRadiusCm = 55;
+int intCapacity = 0;
+int TANK_intLevelCm = 0;
+float floatLitersPerCm = 3.75;
+float floatSpeedOfSoundCMPMS = 0.034;
+int intPortValue = 0;
+static int lastTankLevel = -1; // Global para evitar spam
+bool initialStartSent = false;
+
+// Polar Map Constants
+#define DRAGON_MAP_WIDTH 512
+#define DRAGON_MAP_HEIGHT 128
+#define GOAT_MAP_WIDTH 512
+#define GOAT_MAP_HEIGHT 128
+#define DEFAULT_MAP_WIDTH 512
+#define DEFAULT_MAP_HEIGHT 128
+#define NO_SCLERA_MAP_WIDTH 512
+#define NO_SCLERA_MAP_HEIGHT 128
+
+const float Rshunt = 150.0;       // resistencia en ohm
+const float I_min = 0.0;          // corriente mínima en mA (tanque vacío)
+const float I_max = 0.72;         // corriente máxima en mA (tanque lleno)
 const float TankCapacity = 750.0; // litros
-
-
-
 
 // Variables para control de servos
 unsigned long lastServoCheck = 0;
@@ -123,24 +188,25 @@ void updateServoHorario() {
   int currentHour = timeClient.getHours();
   int currentMinute = timeClient.getMinutes();
   int newAngle = 0;
-  
+
   // Mapeo de horas a ángulos
   if (currentHour == 5) {
     newAngle = 60;
   } else if (currentHour == 12) {
     newAngle = 120;
-  } else if (currentHour == 15) {  // 3 PM
+  } else if (currentHour == 15) { // 3 PM
     newAngle = 180;
-  } else if (currentHour == 20) {  // 8 PM
+  } else if (currentHour == 20) { // 8 PM
     newAngle = 0;
   } else if (currentHour > 5 && currentHour < 12) {
     // Interpolación entre 5 AM (60°) y 12 PM (120°)
     newAngle = map(currentHour * 60 + currentMinute, 5 * 60, 12 * 60, 60, 120);
   } else if (currentHour > 12 && currentHour < 15) {
     // Interpolación entre 12 PM (120°) y 3 PM (180°)
-    newAngle = map(currentHour * 60 + currentMinute, 12 * 60, 15 * 60, 120, 180);
+    newAngle =
+        map(currentHour * 60 + currentMinute, 12 * 60, 15 * 60, 120, 180);
   }
-  
+
   // Solo enviar comando si el ángulo ha cambiado
   if (newAngle != currentHourAngle) {
     String command = "H:" + String(newAngle);
@@ -154,16 +220,16 @@ void updateServoHorario() {
 void updateServoInclinacion() {
   int currentHour = timeClient.getHours();
   int newAngle;
-  
+
   // Cambiar inclinación cada 8 horas (0h, 8h, 16h)
   if (currentHour >= 16) {
-    newAngle = 150;  // Tarde
+    newAngle = 150; // Tarde
   } else if (currentHour >= 8) {
-    newAngle = 90;   // Mediodía
+    newAngle = 90; // Mediodía
   } else {
-    newAngle = 30;   // Mañana
+    newAngle = 30; // Mañana
   }
-  
+
   // Solo enviar comando si el ángulo ha cambiado
   if (newAngle != currentInclinacionAngle) {
     String command = "I:" + String(newAngle);
@@ -173,30 +239,35 @@ void updateServoInclinacion() {
   }
 }
 
-///// reloj
+// /// reloj
 
-   const long utcOffsetInSeconds = -18000;                                                                        // 3600 = western europe winter time - 7200 = western europe summer time
-   char daysOfTheWeek[7][12] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
+const long utcOffsetInSeconds = -18000; // 3600 = western europe winter time -
+                                        // 7200 = western europe summer time
+char daysOfTheWeek[7][12] = {"Sunday",   "Monday", "Tuesday", "Wednesday",
+                             "Thursday", "Friday", "Saturday"};
 
+// --- Adafruit_GC9A01A SETUP ---
+#undef TFT_DC
+#undef TFT_CS
+#define TFT_DC 4  // D2
+#define TFT_CS 15 // D8
 
-   #define TFT_DC  D2
-   #define TFT_CS  D8
-   #define DEG2RAD 0.0174532925   
-   
+Adafruit_GC9A01A tft(TFT_CS, TFT_DC);
+
+#define DEG2RAD 0.0174532925
+
 // some extra colors
-   #define BLACK      0x0000
-   #define BLUE       0x001F
-   #define RED        0xF800
-   #define GREEN      0x07E0
-   #define CYAN       0x07FF
-   #define MAGENTA    0xF81F
-   #define YELLOW     0xFFE0
-   #define WHITE      0xFFFF
-   #define ORANGE     0xFBE0
-   #define GREY       0x84B5
-   #define BORDEAUX   0xA000
-
-
+#define BLACK 0x0000
+#define BLUE 0x001F
+#define RED 0xF800
+#define GREEN 0x07E0
+#define CYAN 0x07FF
+#define MAGENTA 0xF81F
+#define YELLOW 0xFFE0
+#define WHITE 0xFFFF
+#define ORANGE 0xFBE0
+#define GREY 0x84B5
+#define BORDEAUX 0xA000
 
 /****************Mail************/
 const char *user_base64 = "joffre.hermosilla@gmail.com";
@@ -207,10 +278,11 @@ uint32_t TIEMPO_DeepSleep = 90e6;
 int contMail = 0;
 
 /****************EMAIL************/
-byte sendEmail(int x);
-byte eRcv(WiFiClientSecure client);
+byte sendEmail(String x);
+byte eRcv(WiFiClient client);
 
-/** The smtp host name e.g. smtp.gmail.com for GMail or smtp.office365.com for Outlook or smtp.mail.yahoo.com */
+/** The smtp host name e.g. smtp.gmail.com for GMail or smtp.office365.com for
+ * Outlook or smtp.mail.yahoo.com */
 #define SMTP_HOST "smtp.gmail.com"
 #define SMTP_PORT 465
 
@@ -224,19 +296,6 @@ byte eRcv(WiFiClientSecure client);
 /* Declare the global used SMTPSession object for SMTP transport */
 SMTPSession smtp;
 
-// Setup for DHT======================================
-#include <DHT.h>
-#define DHTPIN 2 // GPIO2 atau D4
-// Uncomment the type of sensor in use:
-// #define DHTTYPE    DHT11     // DHT 11
-#define DHTTYPE DHT11 // DHT 22 (AM2302)
-// #define DHTTYPE    DHT21     // DHT 21 (AM2301)
-DHT dht(DHTPIN, DHTTYPE);
-
-// current temperature & humidity, updated in loop()
-float t = 0.0;
-float h = 0.0;
-
 // declare topic for publish message
 const char *topic_pub = "ESP_Pub";
 // declare topic for subscribe message
@@ -247,17 +306,13 @@ const char *topic_sub = "ESP_Sub";
 const char *mqtt_server = "broker.mqtt-dashboard.com";
 // const char *mqtt_server = "2001:41d0:1:925e::1";
 //  for output
-int lamp1 = 16; // lamp for mqtt connected D0
-int lamp2 = 5;  // lamp for start indicator D1
-int lamp3 = 4;  // lamp for stop indicator D2
+int lamp1 = 16; // D0 - LIBRE
+int lamp2 = 0;  // D3 - LIBRE
+int lamp3 = 2;  // D4 - LIBRE
 
-
-
-
-//configuracion ESP-NOW
-// REPLACE WITH RECEIVER MAC Address
-//3C:84:27:28:FA:F8 
-
+// configuracion ESP-NOW
+//  REPLACE WITH RECEIVER MAC Address
+// 3C:84:27:28:FA:F8
 
 uint8_t broadcastAddress[] = {0x3C, 0x84, 0x27, 0x28, 0xFA, 0xF8};
 
@@ -269,32 +324,23 @@ typedef struct struct_message {
   float c;
   String d;
   bool e;
-}
- struct_message;
+} struct_message;
 
 // Create a struct_message called myData
 struct_message myData;
 
-unsigned long lastTime = 0;  
-unsigned long timerDelay = 2000;  // send readings timer
+unsigned long lastTime = 0;
+unsigned long timerDelay = 2000; // send readings timer
 
 // Callback when data is sent
 void OnDataSent(uint8_t *mac_addr, uint8_t sendStatus) {
   Serial.print("Last Packet Send Status: ");
-  if (sendStatus == 0){
+  if (sendStatus == 0) {
     Serial.println("Delivery success");
-  }
-  else{
+  } else {
     Serial.println("Delivery fail");
   }
 }
-
-
-
-
-
-
-
 
 WiFiClient espClient;
 PubSubClient client(espClient);
@@ -303,16 +349,21 @@ PubSubClient client(espClient);
 /* Callback function to get the Email sending status */
 void smtpCallback(SMTP_Status status);
 
-// WHATSAPP //
-WiFiClient wifiClient;
-HTTPClient http;
 // COLOCAMOS EL TOKEN QUE NOS ENTREGA META
-String token = "Bearer EAAPIgr6P6AABO8pZBKOb1RQZClIcmMMi9Q0S2mb5sFmtrLbSVirYV3aslDwUBeSzWQZB5rafBXFKf1XWFUBZBNRmrgQ3HgBv247X5L8l9PAhcT3217ZBNFWGTTT94hDVLGSpzQcMCw8oIIeTw88euwHLAfwCHSR348j6O1dpQ8wqSXcGZB7SuQCJ3vSkaZCj2l0";
-
+// [!] ADVERTENCIA: Este token es temporal y expira cada 24 horas. Para
+// producción, usa un Permanent Token.
+String token =
+    "Bearer "
+    "EAAPIgr6P6AABO8pZBKOb1RQZClIcmMMi9Q0S2mb5sFmtrLbSVirYV3aslDwUBeSzWQZB5rafB"
+    "XFKf1XWFUBZBNRmrgQ3HgBv247X5L8l9PAhcT3217ZBNFWGTTT94hDVLGSpzQcMCw8oIIeTw88"
+    "euwHLAfwCHSR348j6O1dpQ8wqSXcGZB7SuQCJ3vSkaZCj2l0";
 // COLOCAMOS LA URL A DONDE SE ENVIAN LOS MENSAJES DE WHATSAPP
 String servidor = "https://graph.facebook.com/v20.0/432760356580137/messages";
 // CREAMOS UNA JSON DONDE SE COLOCA EL NUMERO DE TELEFONO Y EL MENSAJE
-String payload = "{ \"messaging_product\": \"whatsapp\", \"to\": \"51989168761\", \"type\": \"template\", \"template\": { \"name\": \"hello_world\", \"language\": { \"code\": \"en_US\" } } }";
+String payload =
+    "{ \"messaging_product\": \"whatsapp\", \"to\": \"51989168761\", \"type\": "
+    "\"template\", \"template\": { \"name\": \"hello_world\", \"language\": { "
+    "\"code\": \"en_US\" } } }";
 // PIN DEL SENSOR DE MOVIMIENTO
 const int pinSensorMov = 15;
 // ESTADO DEL SENSOR
@@ -323,59 +374,51 @@ String phoneNumber = "51989168761";
 String apiKey = "37fee9bc-ffc4-4ac9-964a";
 
 /******************GLOBAL VARIABLES AND CONSTANTS ************/
-int intPortValue = 0;
-float floatLevelVolts = 0.0;
-float floatLevelCm = 0.0;
-float floatCapacityCm = 0.0;
-int intLevelPercent = 0;
+// Consolidated at the top
 
-const float floatCmPerVolt = 200 / 2.4;
-const int intTankRadiusCm = 55;
+// --- MENSAJES DE ESTADO PANTALLA ---
+enum DisplayState { STATE_EYE, STATE_CLOCK, STATE_IMAGE };
 
-int intDistance;
-int intTime;
-int intVolume = 0;
-int intFull = 30;
-int intEmpty = 120;
-int intCapacity = 0;
-// int intTankRadiusCm=50;
-int intLevelCm = 0;
-int intLevel = 0;
-float floatLitersPerCm = 0.0;
-float floatSpeedOfSoundCMPMS = 0.0;
+DisplayState currentScreenState = STATE_EYE;
+unsigned long stateStartTime = 0;
+// Intervalos en milisegundos
+const unsigned long EYE_DURATION = 30UL * 1000UL;   // 30 segundos
+const unsigned long CLOCK_DURATION = 30UL * 1000UL; // 30 segundos
+const unsigned long IMAGE_DURATION = 10UL * 1000UL; // 10 segundos
 
-
+int eyeStyleCycle = 0; // 0=Dragon, 1=Goat, 2=Default, 3=NoSclera
 
 // Las configuraciones de red se manejan desde el array redes[]
 
 void conectarWiFiDinamico() {
   WiFi.mode(WIFI_STA);
-  
+
   // Intentar conectar a cada red en el array (incluyendo la última)
-  for(int i = 0; i < numRedes; i++) {
-    Serial.print("\nIntentando conectar a ");
+  for (int i = 0; i < numRedes;
+       i++) { // Assuming 'numRedes' is the correct variable for the array size
+    WiFi.begin(redes[i].ssid,
+               redes[i].password); // Assuming 'redes[i].password' is correct
+    Serial.print("Intentando conectar a ");
     Serial.println(redes[i].ssid);
-    
-    WiFi.begin(redes[i].ssid, redes[i].password);
-    int intentos = 0;
-    
-    while (WiFi.status() != WL_CONNECTED && intentos < 20) {
+
+    int retries = 0;
+    while (WiFi.status() != WL_CONNECTED && retries < 20) {
       delay(500);
       Serial.print(".");
-      intentos++;
+      yield(); // <--- FUNDAMENTAL: Evita que el Watchdog reinicie
+      retries++;
     }
-    
+
     if (WiFi.status() == WL_CONNECTED) {
-      Serial.println("\nConexión exitosa");
+      ssid_conectado = redes[i].ssid;
+      Serial.println("\nConexión exitosa!");
       Serial.print("IP local: ");
       Serial.println(WiFi.localIP());
-      ssid_conectado = redes[i].ssid;
       return;
     }
-    
     Serial.println("\nNo se pudo conectar. Intentando siguiente red...");
-    WiFi.disconnect();
-    delay(1000);
+    delay(500);
+    yield();
   }
 
   // Si no se pudo conectar a ninguna red, iniciar modo AP
@@ -413,9 +456,8 @@ String header;
 String output5State = "off";
 String output4State = "off";
 
-// Assign output variables to GPIO pins
-const int output5 = 5;
-const int output4 = 4;
+const int output5 = -1; // Desactivado
+const int output4 = -1; // Desactivado
 
 // Current time
 unsigned long currentTime = millis();
@@ -435,102 +477,278 @@ unsigned long lastMsg = 0;
 char msg[MSG_BUFFER_SIZE];
 int value = 0;
 
-
-//CALL ME BOT //
-String phoneNumbercallmebot = "51989168761";
-String apiKeycallmebot = "6550669";
-
-void sendMessageCallmebot(String message){
-
-  // Data to send with HTTP POST
-  String mensaje_final = message + "\nSSID conectado: " + ssid_conectado;
-  String url = "http://api.callmebot.com/whatsapp.php?phone=" + phoneNumbercallmebot + "&apikey=" + apiKeycallmebot + "&text=" + urlEncode(mensaje_final);
-            //    "https://api.callmebot.com/whatsapp.php?phone=51989168761&text=This+is+a+test&apikey=6550669"
-  WiFiClient client;    
-  HTTPClient http;
-  http.begin(client, url);
-
-  // Specify content-type header
-  http.addHeader("Content-Type", "application/x-www-form-urlencoded");
-  
-  // Send HTTP POST request
-  int httpResponseCode = http.POST(url);
-  if (httpResponseCode == 200){
-    Serial.print("Message sent successfully");
-  }
-  else{
-    Serial.println("Error sending the message");
-    Serial.print("HTTP response code: ");
-    Serial.println(httpResponseCode);
-  }
-
-  // Free resources
-  http.end();
-}
-
-
-
-void sendMessage(String message)
-{
-
-  // Data to send with HTTP POST
-  String mensaje_final = message + "\nSSID conectado: " + ssid_conectado;
-  String url = "http://api.callmebot.com/whatsapp.php?phone=" + phoneNumber + "&apikey=" + apiKey + "&text=" + urlEncode(mensaje_final);
-  WiFiClient client;
-  HTTPClient http;
-  http.begin(client, url);
-
-  // Specify content-type header
-  http.addHeader("Content-Type", "application/x-www-form-urlencoded");
-
-  // Send HTTP POST request
-  int httpResponseCode = http.POST(url);
-  if (httpResponseCode == 200)
-  {
-    Serial.print("Message sent successfully");
-  }
-  else
-  {
-    Serial.println("Error sending the message");
-    Serial.print("HTTP response code: ");
-    Serial.println(httpResponseCode);
-  }
-
-  // Free resources
-  http.end();
-}
+// --- CONFIGURACIÓN WHATSAPP META ---
+String phoneNumberID = "432760356580137";
+String metaToken =
+    "EAAPIgr6P6AABRC0gdC4FMoZAr06svUn5CLvrzBz0wPJMWi1nWgs9bgaWpRPj46pgJunutkhVN"
+    "NdG01yry04gg8uZCn63prO72qtqrfDKA8VC8hgnAeRZBP4xntylBu2RNOn7HE54xE6spCdJZCl"
+    "rH4RWE0QMvNXZCZC2B0nQA6zTBFNcmkDgSsFeYqxP0wogZDZD";
+String metaTemplate = "iot_tanque_de_agua_con_espressif_arduino";
 //// reloj
 
- Adafruit_GC9A01A tft(TFT_CS, TFT_DC);
+// Adafruit_GC9A01A tft(TFT_CS, TFT_DC); // Movido arriba para DRAGON EYE
 
-   float sx = 0, sy = 1, mx = 1, my = 0, hx = -1, hy = 0;                              // saved H, M, S x & y multipliers
-   float sdeg = 0, mdeg= 0, hdeg = 0;
-   uint16_t osx = 120, osy = 120, omx = 120, omy = 120, ohx = 120, ohy = 120;          // saved H, M, S x & y coords
-   uint16_t x0=0, x1=0, yy0=0, yy1=0;
-   uint32_t targetTime = 0;                                                            // for next 1 second timeout
+float sx = 0, sy = 1, mx = 1, my = 0, hx = -1,
+      hy = 0; // saved H, M, S x & y multipliers
+float sdeg = 0, mdeg = 0, hdeg = 0;
+uint16_t osx = 120, osy = 120, omx = 120, omy = 120, ohx = 120,
+         ohy = 120; // saved H, M, S x & y coords
+uint16_t x0 = 0, x1 = 0, yy0 = 0, yy1 = 0;
+uint32_t targetTime = 0; // for next 1 second timeout
 
-   int hh = 0;                                                                         // hours variable
-   int mm = 0;                                                                         // minutes variable
-   int ss = 0;                                                                         // seconds variable
+int hh = 0; // hours variable
+int mm = 0; // minutes variable
+int ss = 0; // seconds variable
 
-   // NTP ya está configurado anteriormente  
+// NTP ya está configurado anteriormente
 
 bool initial = 1;
 
+// ==========================================
+// DRAGON EYE LOGICA PORTADA A Adafruit_GC9A01A
+// ==========================================
 
+// Variables Ojo
+// Ojo Animado Variables
+#define NUM_EYES 1
+#define BUFFER_SIZE 256
+uint32_t fstart = 0;
 
-void setup()
-{
-  Serial.begin(9600);
-  serialLeonardo.begin(9600);  // Inicializar comunicación con Leonardo
-  
-  // Inicializar NTP
+// Ojo Motion Trackers
+static bool eyeInMotion = false;
+static int32_t eyeOldX = 512, eyeOldY = 512, eyeNewX = 512, eyeNewY = 512;
+static uint32_t eyeMoveStartTime = 0L;
+static int32_t eyeMoveDuration = 0L;
+const uint8_t ease[] = { // Ease in/out curve for eye movements 3*t^2-2*t^3
+    0,   0,   0,   0,   0,   0,   0,   1,
+    1,   1,   1,   1,   2,   2,   2,   3, // T
+    3,   3,   4,   4,   4,   5,   5,   6,
+    6,   7,   7,   8,   9,   9,   10,  10, // h
+    11,  12,  12,  13,  14,  15,  15,  16,
+    17,  18,  18,  19,  20,  21,  22,  23, // x
+    24,  25,  26,  27,  27,  28,  29,  30,
+    31,  33,  34,  35,  36,  37,  38,  39, // 2
+    40,  41,  42,  44,  45,  46,  47,  48,
+    50,  51,  52,  53,  54,  56,  57,  58, // A
+    60,  61,  62,  63,  65,  66,  67,  69,
+    70,  72,  73,  74,  76,  77,  78,  80, // l
+    81,  83,  84,  85,  87,  88,  90,  91,
+    93,  94,  96,  97,  98,  100, 101, 103, // e
+    104, 106, 107, 109, 110, 112, 113, 115,
+    116, 118, 119, 121, 122, 124, 125, 127, // c
+    128, 130, 131, 133, 134, 136, 137, 139,
+    140, 142, 143, 145, 146, 148, 149, 151, // J
+    152, 154, 155, 157, 158, 159, 161, 162,
+    164, 165, 167, 168, 170, 171, 172, 174, // a
+    175, 177, 178, 179, 181, 182, 183, 185,
+    186, 188, 189, 190, 192, 193, 194, 195, // c
+    197, 198, 199, 201, 202, 203, 204, 205,
+    207, 208, 209, 210, 211, 213, 214, 215, // o
+    216, 217, 218, 219, 220, 221, 222, 224,
+    225, 226, 227, 228, 228, 229, 230, 231, // b
+    232, 233, 234, 235, 236, 237, 237, 238,
+    239, 240, 240, 241, 242, 243, 243, 244, // s
+    245, 245, 246, 246, 247, 248, 248, 249,
+    249, 250, 250, 251, 251, 251, 252, 252, // o
+    252, 253, 253, 253, 254, 254, 254, 254,
+    254, 255, 255, 255, 255, 255, 255, 255}; // n
+
+// Config Ojo
+#define IRIS_MIN 140
+#define IRIS_MAX 260
+#define TRACKING
+
+uint16_t oldIris = (IRIS_MIN + IRIS_MAX) / 2, newIris;
+
+// ===================== EYE POINTERS =====================
+const uint16_t *current_sclera = dragon_sclera;
+const uint16_t *current_iris = dragon_iris;
+const uint16_t *current_polar = dragon_polar;
+const uint8_t *current_upper = dragon_upper;
+const uint8_t *current_lower = dragon_lower;
+uint16_t current_sclera_width = DRAGON_SCLERA_WIDTH;
+uint16_t current_sclera_height = DRAGON_SCLERA_HEIGHT;
+uint16_t current_iris_width = DRAGON_IRIS_WIDTH;
+uint16_t current_iris_height = DRAGON_IRIS_HEIGHT;
+uint16_t current_map_width = DRAGON_MAP_WIDTH;
+uint16_t current_map_height = DRAGON_MAP_HEIGHT;
+// ========================================================
+
+// ---------------- DRAGON EYE FUNCIONES ----------------
+void drawEye(uint8_t e, uint32_t iScale, uint32_t scleraX, uint32_t scleraY,
+             uint32_t uT, uint32_t lT) {
+
+  uint16_t rowBuffer[128];
+  uint32_t screenX, screenY, scleraXsave;
+  int32_t irisX, irisY;
+  uint16_t p;
+  uint32_t p_data, a, d;
+
+  scleraXsave = scleraX;
+  irisY = scleraY - (current_sclera_height - current_iris_height) / 2;
+
+  tft.startWrite();
+  // Adafruit_GC9A01A uses (x, y, w, h). 128x128 centered on 240x240 is (56, 56,
+  // 128, 128)
+  tft.setAddrWindow(56, 56, 128, 128);
+
+  for (screenY = 0; screenY < 128; screenY++, scleraY++, irisY++) {
+    scleraX = scleraXsave;
+    irisX = scleraXsave - (current_sclera_width - current_iris_width) / 2;
+    for (screenX = 0; screenX < 128; screenX++, scleraX++, irisX++) {
+      if ((pgm_read_byte(current_lower + screenY * 128 + screenX) <= lT) ||
+          (pgm_read_byte(current_upper + screenY * 128 + screenX) <= uT)) {
+        p = 0;
+      } else if ((irisY < 0) || (irisY >= current_iris_height) || (irisX < 0) ||
+                 (irisX >= current_iris_width)) {
+        p = pgm_read_word(current_sclera + scleraY * current_sclera_width +
+                          scleraX);
+      } else {
+        p_data =
+            pgm_read_word(current_polar + irisY * current_iris_width + irisX);
+        d = (iScale * (p_data & 0x7F)) / 128;
+        if (d < current_map_height) {
+          a = (current_map_width * (p_data >> 7)) / 512;
+          p = pgm_read_word(current_iris + d * current_map_width + a);
+        } else {
+          p = pgm_read_word(current_sclera + scleraY * current_sclera_width +
+                            scleraX);
+        }
+      }
+      rowBuffer[screenX] = (p >> 8) | (p << 8); // Endianness swap
+    }
+    tft.writePixels(rowBuffer, 128);
+    yield();
+  }
+  tft.endWrite();
+}
+
+void frame(uint32_t iScale) {
+  static uint8_t eyeIndex = 0;
+  int32_t eyeX, eyeY;
+  uint32_t t = micros();
+
+  int32_t dt = t - eyeMoveStartTime;
+  if (eyeInMotion) {
+    if (dt >= eyeMoveDuration) {
+      eyeInMotion = false;
+      eyeMoveDuration = random(3000000L);
+      eyeMoveStartTime = t;
+      eyeX = eyeOldX = eyeNewX;
+      eyeY = eyeOldY = eyeNewY;
+    } else {
+      int16_t e = ease[255 * dt / eyeMoveDuration] + 1;
+      eyeX = eyeOldX + (((eyeNewX - eyeOldX) * e) / 256);
+      eyeY = eyeOldY + (((eyeNewY - eyeOldY) * e) / 256);
+    }
+  } else {
+    eyeX = eyeOldX;
+    eyeY = eyeOldY;
+    if (dt > eyeMoveDuration) {
+      int16_t dx, dy;
+      uint32_t d;
+      do {
+        eyeNewX = random(1024);
+        eyeNewY = random(1024);
+        dx = (eyeNewX * 2) - 1023;
+        dy = (eyeNewY * 2) - 1023;
+      } while ((d = (dx * dx + dy * dy)) > (1023 * 1023));
+      eyeMoveDuration = random(50000, 150000);
+      eyeMoveStartTime = t;
+      eyeInMotion = true;
+    }
+  }
+
+  iScale = ((current_map_height + 1) * 1024) /
+           (1024 - (iScale * (current_map_height - 1) / current_map_height));
+
+  eyeX = map(eyeX, 0, 1023, 0, current_sclera_width - 128);
+  eyeY = map(eyeY, 0, 1023, 0, current_sclera_height - 128);
+
+  eyeX += 4;
+  if (eyeX > (current_sclera_width - 128))
+    eyeX = (current_sclera_width - 128);
+
+  static uint8_t uThreshold = 128;
+  uint8_t lThreshold, n;
+
+#ifdef TRACKING
+  int16_t sampleX = current_sclera_width / 2 - (eyeX / 2),
+          sampleY =
+              current_sclera_height / 2 - (eyeY + current_iris_height / 4);
+
+  if (sampleY < 0)
+    n = 0;
+  else
+    n = (pgm_read_byte(current_upper + sampleY * 128 + sampleX) +
+         pgm_read_byte(current_upper + sampleY * 128 + (128 - 1 - sampleX))) /
+        2;
+  uThreshold = (uThreshold * 3 + n) / 4;
+  lThreshold = 254 - uThreshold;
+#else
+  uThreshold = lThreshold = 0;
+#endif
+
+  n = uThreshold;
+
+  drawEye(eyeIndex, iScale, eyeX, eyeY, n, lThreshold);
+}
+
+void split(int16_t startValue, int16_t endValue, uint32_t startTime,
+           int32_t duration, int16_t range) {
+
+  // Si estamos en otro estado que no sea OJO, abortamos el ciclo split
+  // recursivo
+  if (currentScreenState != STATE_EYE)
+    return;
+
+  // Añadimos yield para que el sistema respire entre recursiones
+  yield();
+
+  if (range >=
+      10) { // Aumentamos el rango mínimo para reducir profundidad recursiva
+    range /= 2;
+    duration /= 2;
+    int16_t midValue = (startValue + endValue - range) / 2 + random(range);
+    uint32_t midTime = startTime + duration;
+
+    split(startValue, midValue, startTime, duration, range);
+    yield(); // Respiro extra entre ramas
+    split(midValue, endValue, midTime, duration, range);
+  } else {
+    int32_t dt;
+    int16_t v;
+    while ((dt = (micros() - startTime)) < duration) {
+      if (currentScreenState != STATE_EYE)
+        break;
+
+      v = startValue + (((endValue - startValue) * dt) / duration);
+      if (v < IRIS_MIN)
+        v = IRIS_MIN;
+      else if (v > IRIS_MAX)
+        v = IRIS_MAX;
+
+      frame(v);
+
+      // Mantenemos conexión y evitamos WDT
+      yield();
+    }
+  }
+}
+
+// ==========================================
+
+void setup() {
+  Serial.begin(115200);
+  // CPU frequency setting removed to avoid compatibility issues
+  WiFi.setSleepMode(WIFI_NONE_SLEEP); // High performance WiFi
   timeClient.begin();
-  timeClient.setTimeOffset(-18000);  // UTC-5 para Perú
-  
+  timeClient.setTimeOffset(-18000); // UTC-5 para Perú
+
   // Set device as a Wi-Fi Station
   WiFi.mode(WIFI_STA);
 
+  /* Comentado temporalmente para estabilidad
   // Init ESP-NOW
   if (esp_now_init() != 0) {
     Serial.println("Error initializing ESP-NOW");
@@ -541,103 +759,78 @@ void setup()
   // get the status of Trasnmitted packet
   esp_now_set_self_role(ESP_NOW_ROLE_CONTROLLER);
   esp_now_register_send_cb(OnDataSent);
-  
+
   // Register peer
   esp_now_add_peer(broadcastAddress, ESP_NOW_ROLE_SLAVE, 1, NULL, 0);
+  */
 
-// comunicacion con arduino leonardo
+  // comunicacion con arduino leonardo
 
-//Serial2.begin(9600, SERIAL_8N1, RXp2, TXp2);
-
+  // Serial2.begin(9600, SERIAL_8N1, RXp2, TXp2);
 
   /// reloj
- tft.begin (); 
-   tft.setRotation (2);
-   tft.fillScreen (BLACK);  
-   delay (200);
-   tft.fillScreen (RED);
-   delay (200);
-   tft.fillScreen (GREEN);
-   delay (200);
-   tft.fillScreen (BLUE);
-   delay (200);
-   tft.fillScreen (BLACK);  
-   delay (200);
-   tft.fillScreen (GREY);
+  tft.begin(16000000); // Reduce SPI to 16MHz for stability
+  tft.setRotation(2);
+  tft.fillScreen(BLACK);
+  delay(200);
+  tft.fillScreen(RED);
+  delay(200);
+  tft.fillScreen(GREEN);
+  delay(200);
+  tft.fillScreen(BLUE);
+  delay(200);
+  tft.fillScreen(BLACK);
+  delay(200);
+  tft.fillScreen(GREY);
 
-   createDial ();
+  createDial();
 
-   Serial.begin (9600);
-   Serial.println ();
-   Serial.println ();
+  // Serial duplicate removed (keeping 115200 from begin of setup)
   conectarWiFiDinamico();
-  Serial.println ("-------------------------------"); 
+  Serial.println("-------------------------------");
   timeClient.begin();
-  timeClient.update ();
-  Serial.print ("internet server time: ");   
+  timeClient.update();
+  Serial.print("internet server time: ");
   Serial.println(timeClient.getFormattedTime());
-  hh = timeClient.getHours ();
-  mm = timeClient.getMinutes ();
-  ss = timeClient.getSeconds ();
+  hh = timeClient.getHours();
+  mm = timeClient.getMinutes();
+  ss = timeClient.getSeconds();
   // put your setup code here, to run once:
-  float SpeedOfSoundsMPS;
-  float floatSpeedOfSoundCMPMS = SpeedOfSoundsMPS * 100 / 1000000;
-  float floatLitersPerCm = PI * (intTankRadiusCm * intTankRadiusCm) / 1000;
-  int intCapacity = intEmpty - intFull;
-  Serial.begin(SerialSpeed);
+  float SpeedOfSoundsMPS = 343.0; // Velocidad del sonido estándar
+  floatSpeedOfSoundCMPMS = SpeedOfSoundsMPS * 100.0 / 1000000.0;
+  floatLitersPerCm = PI * (intTankRadiusCm * intTankRadiusCm) / 1000.0;
+  intCapacity = TANK_intEmpty - TANK_intFull;
 
-  // whatbot //
+  // WiFi already started in ConnectingWiFiDinamico (now called once in setup)
+  // sendMessageCallmebot removed from here to consolidate at end of setup
 
-  whatabotClient.begin();
-  whatabotClient.onMessageReceived(onMessageReceived);
-  whatabotClient.onServerResponseReceived(onServerResponseReceived);
-
-
-
-
-  //tanque de agua
- pinMode(TRIGGER_T, OUTPUT);
+  // tanque de agua
+  pinMode(TRIGGER_T, OUTPUT);
   pinMode(ECHO_T, INPUT);
   digitalWrite(TRIGGER_T, LOW);
 
-  Serial.println("Sistema de nivel iniciado");
-  int adcVal = analogRead(LEVEL_SENSOR_T);
-  float Vadc = (adcVal * 3.3) / 4095.0;
-  float I_mA = (Vadc / Rshunt) * 1000.0;
+  /*
+    Serial.println("Sistema de nivel iniciado");
+    int adcVal = analogRead(LEVEL_SENSOR_T);
+    float Vadc = (adcVal * 3.3) / 4095.0;
+    float I_mA = (Vadc / Rshunt) * 1000.0;
+    float Level_percent = (I_mA - I_min) / (I_max - I_min) * 100.0;
+    if (Level_percent < 0) Level_percent = 0;
+    if (Level_percent > 100) Level_percent = 100;
+    float Volume_L = (Level_percent / 100.0) * TankCapacity;
+  */
 
-  float Level_percent = (I_mA - I_min) / (I_max - I_min) * 100.0;
-  if (Level_percent < 0) Level_percent = 0;
-  if (Level_percent > 100) Level_percent = 100;
+  // --- Depuración Inicial Limpia ---
+  Serial.println("\n----------------------------------");
+  Serial.println("SISTEMA DE TANQUE CODER PATH v2.0");
+  Serial.println("----------------------------------");
 
-  float Volume_L = (Level_percent / 100.0) * TankCapacity;
-
- 
-
-
-
-
-
-
-  Serial.setTimeout(timeoutTime);
-  Serial.println("------------------");
-  Serial.print("ADC: "); Serial.println(adcVal);
-  Serial.print("Vadc: "); Serial.println(Vadc, 3);
-  Serial.print("I_mA: "); Serial.println(I_mA, 3);
-  Serial.print("Nivel: "); Serial.print(Level_percent, 1); Serial.println(" %");
-  Serial.print("Volumen: "); Serial.print(Volume_L, 1); Serial.println(" L");
-  Serial.print("Capacity: ");
-  Serial.print(intCapacity);
-  Serial.print("Speed of sound Cm per uS: ");
-  Serial.print(floatSpeedOfSoundCMPMS);
-  Serial.print("Liters per cm: ");
-  Serial.print(floatLitersPerCm);
-
-
-  pinMode(TRIGGER, OUTPUT);
-  pinMode(ECHO, INPUT_PULLUP);
-  WiFi.config(ip, gateway, subnet);
-  conectarWiFiDinamico();
-  Serial.print("\nJoffre  CODER PATH WEB SERVER ESP8266 INICIANDO....");
+  /*
+    pinMode(TRIGGER, OUTPUT);
+    pinMode(ECHO, INPUT_PULLUP);
+  */
+  // WiFi.config(ip, gateway, subnet); // Comentado para usar DHCP (Más estable)
+  // WiFi connection handled once below
   server.on("/", handle_OnConnect);
   server.on("/tankStatus", getTankStatus);
   server.on("/ledon", handle_ledon);
@@ -645,645 +838,271 @@ void setup()
   server.onNotFound(handle_NotFound);
   server.begin();
 
-  // nuevo
+  // Inicialización de displays o configuraciones web se procesan desde aquí
 
-  // Initialize the output variables as outputs
-  pinMode(output5, OUTPUT);
-  pinMode(output4, OUTPUT);
-  // Set outputs to LOW
-  digitalWrite(output5, LOW);
-  digitalWrite(output4, LOW);
+  Serial.println("\n--- CONFIGURACION FINAL ---");
 
-  // Configures static IP address
-  if (!WiFi.config(ip, gateway, subnet)) {
-    Serial.println("STA Failed to configure");
-  }
-  conectarWiFiDinamico();
-  Serial.println("");
-  Serial.println("WiFi conectado o AP iniciado.");
-  Serial.println("IP address: ");
-  Serial.println(WiFi.localIP());
-  server.begin();
-
-  // DEEP SLEEP
-
-
-  /* get the wakeup reason
-  ESP_SleepWakeupCause wakeupReason = ESP.getWakeupReason();
-  switch (wakeupReason)
-  {
-  case ESP_SLEEP_WAKEUP_TIMER:
-    Serial.println("Wakeup caused by timer");
-    break;
-  case ESP_SLEEP_WAKEUP_EXT0:
-    Serial.println("Wakeup caused by external signal using RTC_IO");
-    break;
-  case ESP_SLEEP_WAKEUP_EXT1:
-    Serial.println("Wakeup caused by external signal using RTC_CNTL");
-    break;
-  case ESP_SLEEP_WAKEUP_TOUCHPAD:
-    Serial.println("Wakeup caused by touchpad");
-    break;
-  case ESP_SLEEP_WAKEUP_ULP:
-    Serial.println("Wakeup caused by ULP program");
-    break;
-  default:
-    Serial.println("Wakeup was not caused by deep sleep");
-    break;
-  } */
-
-  // MAIL CON SMTP //
-  // gmail_configuration();
-
-  // Send Message to WhatsAPP by whatbot
-  sendMessage("Hello Joffre, Soy el ESP8266 Reportando informe de IOT");
-
-
-
-  // GMAIL SMPT ///
-
-  Serial.println();
-  Serial.print("Connected with IP: ");
-  Serial.println(WiFi.localIP());
-  Serial.println();
-
-  /*  Set the network reconnection option */
-  MailClient.networkReconnect(true);
-
-  /** Enable the debug via Serial port
-   * 0 for no debugging
-   * 1 for basic level debugging
-   *
-   * Debug port can be changed via ESP_MAIL_DEFAULT_DEBUG_PORT in ESP_Mail_FS.h
-   */
-  smtp.debug(1);
-
-  /* Set the callback function to get the sending results */
-  smtp.callback(smtpCallback);
-
-  /* Declare the Session_Config for user defined session credentials */
-  Session_Config config;
-
-  /* Set the session config */
-  config.server.host_name = SMTP_HOST;
-  config.server.port = SMTP_PORT;
-  config.login.email = AUTHOR_EMAIL;
-  config.login.password = AUTHOR_PASSWORD;
-  config.login.user_domain = "";
-
-  /*
-  Set the NTP config time
-  For times east of the Prime Meridian use 0-12
-  For times west of the Prime Meridian add 12 to the offset.
-  Ex. American/Denver GMT would be -6. 6 + 12 = 18
-  See https://en.wikipedia.org/wiki/Time_zone for a list of the GMT/UTC timezone offsets
-  */
-  config.time.ntp_server = F("pool.ntp.org,time.nist.gov");
-  config.time.gmt_offset = 3;
-  config.time.day_light_offset = 0;
-
-  /* Declare the message class */
-  SMTP_Message message;
-
-  /* Set the message headers */
-  message.sender.name = F("ESP8266 - CODER PATH");
-  message.sender.email = AUTHOR_EMAIL;
-  message.subject = F("ESP8266 Test Email enviado desde ESP8266");
-  message.addRecipient(F("Joffre"), RECIPIENT_EMAIL);
-
-  /*Send HTML message*/
-  /*String htmlMsg = "<div style=\"color:#2f4468;\"><h1>Hello World!</h1><p>- Sent from ESP board</p></div>";
-  message.html.content = htmlMsg.c_str();
-  message.html.content = htmlMsg.c_str();
-  message.text.charSet = "us-ascii";
-  message.html.transfer_encoding = Content_Transfer_Encoding::enc_7bit;*/
-
-  // Send raw text message
-String textMsg = String("Hello World! - Mensaje enviado desde el microcontrolador esp8266 - lo lograste!!! ") +
-  " ADC: " + String(adcVal) +
-  " Vadc: " + String(Vadc) +
-  " I_mA: " + String(I_mA) +
-  " Nivel: " + String(Level_percent) + " % " +
-  " Volumen: " + String(Volume_L) + " L";
-  message.text.content = textMsg.c_str();
-  message.text.charSet = "us-ascii";
-  message.text.transfer_encoding = Content_Transfer_Encoding::enc_7bit;
-
-  message.priority = esp_mail_smtp_priority::esp_mail_smtp_priority_low;
-  message.response.notify = esp_mail_smtp_notify_success | esp_mail_smtp_notify_failure | esp_mail_smtp_notify_delay;
-
-  /* Connect to the server */
-  if (!smtp.connect(&config))
-  {
-    ESP_MAIL_PRINTF("Connection error, Status Code: %d, Error Code: %d, Reason: %s", smtp.statusCode(), smtp.errorCode(), smtp.errorReason().c_str());
-    return;
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.print("Conectado a: ");
+    Serial.println(ssid_conectado);
+    Serial.print("IP: ");
+    Serial.println(WiFi.localIP());
   }
 
-  if (!smtp.isLoggedIn())
-  {
-    Serial.println("\nNot yet logged in.");
-  }
-  else
-  {
-    if (smtp.isAuthenticated())
-      Serial.println("\nSuccessfully logged in.");
-    else
-      Serial.println("\nConnected with no Auth.");
-  }
+  // MQTT se configurará dinámicamente en el loop o después para evitar bloqueos
+  // client.setServer(mqtt_server, 1883);
+  // client.setCallback(callback);
 
-  /* Start sending Email and close the session */
-  if (!MailClient.sendMail(&smtp, &message))
-    ESP_MAIL_PRINTF("Error, Status Code: %d, Error Code: %d, Reason: %s", smtp.statusCode(), smtp.errorCode(), smtp.errorReason().c_str());
-
-  /// MQTT //
-  dht.begin();
-  setup_wifi();
-  client.setServer(mqtt_server, 1883);
-  client.setCallback(callback);
-  // subscribe topic
-  client.subscribe(topic_sub);
-  // setup pin output
   pinMode(lamp1, OUTPUT);
-  pinMode(lamp2, OUTPUT);
-  pinMode(lamp3, OUTPUT);
-  // Reset lamp, turn off all Relay
   digitalWrite(lamp1, HIGH);
+  pinMode(lamp2, OUTPUT);
   digitalWrite(lamp2, HIGH);
+  pinMode(lamp3, OUTPUT);
   digitalWrite(lamp3, HIGH);
+  pinMode(BUILTIN_LED, OUTPUT);
+  pinMode(TRIGGER_T, OUTPUT);
+  pinMode(ECHO_T, INPUT_PULLUP); // Use pullup for echo stability
 
-  // MQTT
-  pinMode(BUILTIN_LED, OUTPUT); // Initialize the BUILTIN_LED pin as an output
-  //  client.setCallback(callback_mqtt(char *topic, byte *payload, unsigned int length));
-
-
-  // CALL ME BOT
-   sendMessageCallmebot("Hello from ESP8266! EXITOSO MENSAJE DESDE CODER PATH " + WiFi.macAddress() );
-
-
-     Serial.println("I'm awake, but I'm going into deep sleep mode for 5 hours");
-  // ESP.deepSleep(15e6); //15 000 segundos = 4.17 horas 
-  //ESP.deepSleep(18e+9, WAKE_RF_DEFAULT); 5 horas
+  Serial.println("--- SETUP COMPLETADO ---");
+  // ESP.deepSleep(18e+9, WAKE_RF_DEFAULT); 5 horas
 }
 
-void loop()
-{
+// Variables globales para persistencia de estado y alertas
+int global_lastSentHour = -1;
+int global_lastTankAlert = -1;
+bool global_initialStartSent = false;
 
-// ESP-NOW 
+void handleAutomatedAlerts() {
+  timeClient.update();
+  int hh = timeClient.getHours();
+  int mm = timeClient.getMinutes();
 
-if ((millis() - lastTime) > timerDelay) {
-    // Set values to send
-    strcpy(myData.a, "THIS IS A CHAR");
-    myData.b = random(1,20);
-    myData.c = 1.2;
-    myData.d = "Hello";
-    myData.e = false;
-
-    // Send message via ESP-NOW
-    esp_now_send(broadcastAddress, (uint8_t *) &myData, sizeof(myData));
-
-    lastTime = millis();
+  // 1. REPORTE DE INICIO (Una sola vez tras conectar)
+  if (!global_initialStartSent && WiFi.status() == WL_CONNECTED && hh > 0) {
+    Serial.println(">>> Enviando Reporte de Bienvenida <<<");
+    Serial.printf("Memoria libre ESP (ANTES): %d\n", ESP.getFreeHeap());
+    sendMessageMeta(TANK_intLevel, TANK_intVolume, "INICIO OK", timeClient.getFormattedTime(), 100);
+    delay(4000); // 4 SEGUNDOS PARA SUPERVIVENCIA MEMORIA RAM DE SSL
+    yield();
+    enviarCorreo("SISTEMA ONLINE - Tanque: " + String(TANK_intLevel) + "%");
+    global_initialStartSent = true;
   }
 
-
-  // comucnicacion con arduino leonardo
-   Serial.println("Message Received: ");
-  //  Serial.println(Serial2.readString())
-
-
-
-  // reloj
-
- if (targetTime < millis())
-      {
-      targetTime += 1000;
-      ss++;                                                                            // advance second
-      if (ss==60)
-         {
-         ss=0;
-         mm++;                                                                         // advance minute
-         if(mm>59)
-            {
-            mm=0;
-            hh++;                                                                      // advance hour
-            
-            // Actualizar servos cada hora
-            updateServoHorario();
-            // Verificar si es hora de actualizar inclinación (cada 8 horas)
-            if (hh % 8 == 0) {
-              updateServoInclinacion();
-            }
-            if (hh>23) 
-               {
-               hh=0;
-               timeClient.update ();                                                   // update at midnight
-               }
-            }
-         }
-
-           // 🔹 Sincronizar con NTP al inicio de cada minuto
-    if (ss == 0) {
-      timeClient.update();
-      hh = timeClient.getHours();
-      mm = timeClient.getMinutes();
-      ss = timeClient.getSeconds();
+  // 2. REPORTE HORARIO (Controlado: 9AM, 12PM, 4PM, 9PM)
+  if (mm == 0 && (hh == 9 || hh == 12 || hh == 16 || hh == 21)) {
+    if (global_lastSentHour != hh) {
+      Serial.println(">>> Enviando Reporte Horario <<<");
+      sendMessageMeta(TANK_intLevel, TANK_intVolume, "REPORTE H", timeClient.getFormattedTime(), 100);
+      delay(4000);
+      yield();
+      enviarCorreo("Reporte " + String(hh) + ":00 - Nivel: " + String(TANK_intLevel) + "%");
+      global_lastSentHour = hh;
     }
-          
-      // pre-compute hand degrees, x & y coords for a fast screen update
-      sdeg = ss*6;                                                                     // 0-59 -> 0-354
-      mdeg = mm*6+sdeg*0.01666667;                                                     // 0-59 -> 0-360 - includes seconds
-      hdeg = hh*30+mdeg*0.0833333;                                                     // 0-11 -> 0-360 - includes minutes and seconds
-      hx = cos ((hdeg-90)*DEG2RAD);    
-      hy = sin ((hdeg-90)*DEG2RAD);
-      mx = cos ((mdeg-90)*DEG2RAD);    
-      my = sin ((mdeg-90)*DEG2RAD);
-      sx = cos ((sdeg-90)*DEG2RAD);    
-      sy = sin ((sdeg-90)*DEG2RAD);
+  }
 
-      if (ss==0 || initial) 
-         {
-         initial = 0;
-         tft.drawLine (ohx, ohy, 120, 121, BLACK);                                     // erase hour and minute hand positions every minute
-         ohx = hx*62+121;    
-         ohy = hy*62+121;
-         tft.drawLine (omx, omy, 120, 121, BLACK);
-         omx = mx*84+120;    
-         omy = my*84+121;
-         }
- 
-      tft.drawLine (osx, osy, 120, 121, BLACK);                                      // redraw new hand positions, hour and minute hands not erased here to avoid flicker
-      osx = sx*90+121;    
-      osy = sy*90+121;
-      tft.drawLine (osx, osy, 120, 121, RED);
-      tft.drawLine (ohx, ohy, 120, 121, WHITE);
-      tft.drawLine (omx, omy, 120, 121, WHITE);
-      tft.drawLine (osx, osy, 120, 121, RED);
-      tft.fillCircle(120, 121, 3, RED);
-      }
+  // 3. ALERTAS DE NIVEL (Si cambia de tramo: 25, 50, 75, 100)
+  int tramo = -1;
+  if (TANK_intLevel >= 100)
+    tramo = 100;
+  else if (TANK_intLevel >= 75)
+    tramo = 75;
+  else if (TANK_intLevel >= 50)
+    tramo = 50;
+  else if (TANK_intLevel >= 25)
+    tramo = 25;
 
+  if (tramo != -1 && tramo != global_lastTankAlert) {
+    Serial.println(">>> Alerta de Nivel Detectada <<<");
+    sendMessageMeta(TANK_intLevel, TANK_intVolume, "ALERTA NIVEL",
+                    timeClient.getFormattedTime(), 100);
+    enviarCorreo("Alerta Nivel: Tanque al " + String(TANK_intLevel) + "%");
+    global_lastTankAlert = tramo;
+  }
+}
 
-  // what bot
-  whatabotClient.loop();
+void updateClock() {
+  if (millis() > targetTime) {
+    targetTime = millis() + 1000;
+    
+    timeClient.update();
+    hh = timeClient.getHours();
+    mm = timeClient.getMinutes();
+    ss = timeClient.getSeconds();
 
+    // Calcular la posición de las manecillas
+    sdeg = ss * 6;                     
+    mdeg = mm * 6 + sdeg * 0.01666667; 
+    hdeg = hh * 30 + mdeg * 0.0833333; 
+    hx = cos((hdeg - 90) * DEG2RAD);    
+    hy = sin((hdeg - 90) * DEG2RAD);
+    mx = cos((mdeg - 90) * DEG2RAD);    
+    my = sin((mdeg - 90) * DEG2RAD);
+    sx = cos((sdeg - 90) * DEG2RAD);    
+    sy = sin((sdeg - 90) * DEG2RAD);
 
-  // tank status
+    if (ss == 0 || initial) {
+      initial = 0;
+      // Borrar las manecillas de la posición anterior (Hora y Minuto)
+      tft.drawLine(ohx, ohy, 120, 121, BLACK);
+      ohx = hx * 62 + 121;    
+      ohy = hy * 62 + 121;
+      tft.drawLine(omx, omy, 120, 121, BLACK);
+      omx = mx * 84 + 120;    
+      omy = my * 84 + 121;
+    }
 
-  /*RANGE 0.6V - 3.0V : 12 Bits 0 -4095 : 0 - 2 M*/
-  intPortValue = analogRead(LEVEL_SENSOR_T);
-  Serial.println("----------------");
-  Serial.print("intPortValue: ");
-  Serial.println(intPortValue);
-  floatLevelVolts = ((intPortValue * 3.3) / 4095) - 0.6;
-  if (floatLevelVolts < 0.0)
-    floatLevelVolts = 0;
-  Serial.println();
-  Serial.print("ESP Board MAC Address:  ");
-  Serial.println(WiFi.macAddress());
+    // Borrar y redibujar Segundero, Minutero y Hora actualizados
+    tft.drawLine(osx, osy, 120, 121, BLACK);
+    osx = sx * 90 + 121;    
+    osy = sy * 90 + 121;
+    tft.drawLine(osx, osy, 120, 121, RED);
+    tft.drawLine(ohx, ohy, 120, 121, WHITE);
+    tft.drawLine(omx, omy, 120, 121, WHITE);
+    tft.drawLine(osx, osy, 120, 121, RED);
+    tft.fillCircle(120, 121, 3, RED);
+  }
+}
+
+void loop() {
+  // --- A. GESTIÓN DE ROTACIÓN DE PANTALLAS ---
+  static unsigned long lastEyeSwitch = 0;
+  static int stateCycle = 0; // 0..3 (Reloj siempre después de cada ojo)
   
+  if (millis() - lastEyeSwitch > 15000) { // Alternar cada 15 segundos
+    lastEyeSwitch = millis();
+    stateCycle = (stateCycle + 1) % 4; // Rota 0 a 3
+    
+    tft.fillScreen(BLACK); // Limpiar al cambiar
+    
+    if (stateCycle % 2 != 0) { // Impar: 1, 3 -> RELOJ
+      currentScreenState = STATE_CLOCK;
+      createDial();
+      initial = 1;
+      targetTime = millis() + 100;
+    } else { // Par: 0, 2 -> OJOS
+      currentScreenState = STATE_EYE;
+      if (stateCycle == 0) { // Ojo de Dragón
+        current_sclera = dragon_sclera;
+        current_iris = dragon_iris;
+        current_polar = dragon_polar;
+        current_upper = dragon_upper;
+        current_lower = dragon_lower;
+        current_sclera_width = DRAGON_SCLERA_WIDTH;
+        current_sclera_height = DRAGON_SCLERA_HEIGHT;
+        current_iris_width = DRAGON_IRIS_WIDTH;
+        current_iris_height = DRAGON_IRIS_HEIGHT;
+        current_map_width = DRAGON_MAP_WIDTH;
+        current_map_height = DRAGON_MAP_HEIGHT;
+      } else if (stateCycle == 2) { // Ojo Default
+        current_sclera = default_sclera;
+        current_iris = default_iris;
+        current_polar = default_polar;
+        current_upper = default_upper;
+        current_lower = default_lower;
+        current_sclera_width = DEFAULT_SCLERA_WIDTH;
+        current_sclera_height = DEFAULT_SCLERA_HEIGHT;
+        current_iris_width = DEFAULT_IRIS_WIDTH;
+        current_iris_height = DEFAULT_IRIS_HEIGHT;
+        current_map_width = DEFAULT_MAP_WIDTH;
+        current_map_height = DEFAULT_MAP_HEIGHT;
+      }
+    }
+  }
 
-  Serial.print("floatLevelVolts: ");
-  Serial.println(floatLevelVolts);
-  floatLevelCm = floatLevelVolts * floatCmPerVolt;
-  Serial.print("floatLevelCm: ");
-  Serial.println(floatLevelCm);
+  // --- B. RENDERIZADO VISUAL ---
+  if (currentScreenState == STATE_CLOCK) {
+    updateClock();
+  } else {
+    newIris = random(IRIS_MIN, IRIS_MAX);
+    split(oldIris, newIris, micros(), 100000L, IRIS_MAX - IRIS_MIN);
+    oldIris = newIris;
+  }
 
-  Serial.print("Nivel en cm: ");
-  Serial.println(floatLevelCm);
-
-  intLevelPercent = (floatLevelCm / floatCapacityCm) * 100;
-  Serial.print("Nivel: ");
-  Serial.print(intLevelPercent);
-  Serial.println("%");
-
-  intVolume = floatLevelCm * floatLitersPerCm;
-  Serial.print("Volume: ");
-  Serial.println(intVolume);
-
-  /**CHECK DISTANCE***/
-
+  // --- B. LECTURA DE SENSORES ---
   digitalWrite(TRIGGER_T, HIGH);
-  delayMicroseconds(15);
+  delayMicroseconds(10);
   digitalWrite(TRIGGER_T, LOW);
-  intTime = pulseIn(ECHO_T, HIGH);
-  intTime = intTime / 2;
-  intDistance = intTime * floatSpeedOfSoundCMPMS;
-  Serial.print("/n Distance: ");
-  Serial.print(intDistance);
-  if (floatLevelVolts != 0)
-  {
-         intLevelCm = intEmpty - intDistance;
-     if(intLevelCm < 0)
-       intLevelCm = 0;
-     if(intLevelCm > intCapacity)
-       intLevelCm = intCapacity;
-     Serial.print("Nivel en CM: "); Serial.print(intLevelCm);
-     Serial.print("CAPACITY"); Serial.print(intCapacity);
-     intLevel=(float(intLevelCm)/float(intCapacity)) * 100;
-     Serial.print("Nivel: "); Serial.print(intLevel); Serial.print("%");
-     intVolume=intLevelCm*floatLitersPerCm;
-     Serial.print("Volume: "); Serial.print(intVolume);
-   
-  }
-  else
-  { // When intDistance is 0 is a sensor error or disconnected
 
-    intLevel = -1;
-    intVolume = -1;
-  }
-
-  /****CHECK WIFI CONNECTION AND CHECK WEBSERVER ***/
-
-  if (WiFi.status() == WL_CONNECTED)
-  {
-
-    server.handleClient();
-    if (LEDstatus)
-    {
-      digitalWrite(output4, HIGH);
-    }
+  long duration = pulseIn(ECHO_T, HIGH, 30000);
+  if (duration > 0) {
+    intDistance = duration * 0.034 / 2;
+    if (intDistance >= TANK_intEmpty)
+      TANK_intLevel = 0;
+    else if (intDistance <= TANK_intFull)
+      TANK_intLevel = 100;
     else
-    {
-      digitalWrite(output4, LOW);
-    }
-  }
-  else
-  {
-    Serial.print("Connection lost");
-    WiFi.disconnect();
-    WiFi.reconnect();
+      TANK_intLevel = map(intDistance, TANK_intEmpty, TANK_intFull, 0, 100);
+
+    TANK_intLevel = constrain(TANK_intLevel, 0, 100);
+    TANK_intVolume = TANK_intLevel * (TankCapacity / 100.0);
   }
 
-  if (WiFi.status() == WL_CONNECTED)
-  {
-    // INICIAMOS EL OBJETO HTTP QUE POSTERIORMENTE ENVIARA EL MENSAJE
-    HTTPClient httpx;
-    // COLOCAMOS LA URL DEL SERVIDOR A DONDE SE ENVIARA EL MENSAJE
-    httpx.begin(wifiClient, servidor.c_str());
-    // COLOCAMOS LA CABECERA DONDE INDICAMOS QUE SERA TIPO JSON
-    httpx.addHeader("Content-Type", "application/json");
-    // AGREGAMOS EL TOKEN EN LA CABECERA DE LOS DATOS A ENVIAR
-    httpx.addHeader("Authorization", token);
-    // ENVIAMOS LOS DATOS VIA POST
-    int httpPostCode = httpx.POST(payload);
-    // SI SE LOGRARON ENVIAR LOS DATOS
-    if (httpPostCode > 0)
-    {
-      // RECIBIMOS LA RESPUESTA QUE NOS ENTREGA META
-      int httpResponseCode = httpx.GET();
-      // SI HAY RESPUESTA LA MOSTRAMOS
-      if (httpResponseCode > 0)
-      {
-        Serial.print("HTTP Response code: ");
-        Serial.println(httpResponseCode);
-        String payload = httpx.getString();
-        Serial.println(payload);
-      }
-      else
-      {
-        Serial.print("Error code: ");
-        Serial.println(httpResponseCode);
-      }
-    }
-    httpx.end();
-  }
-  else
-  {
-    Serial.println("WiFi Desconectado");
-  }
+  // --- C. GESTIÓN DE ALERTAS ---
+  handleAutomatedAlerts();
 
-  delay(500);
-
-  WiFiClient wificlient = server.client(); // Listen for incoming clients
-
-  if (wificlient)
-  {                                // If a new client connects,
-    Serial.println("New Client."); // print a message out in the serial port
-    String currentLine = "";       // make a String to hold incoming data from the client
-    currentTime = millis();
-    previousTime = currentTime;
-    while (wificlient.connected() && currentTime - previousTime <= timeoutTime)
-    { // loop while the client's connected
-      currentTime = millis();
-      if (wificlient.available())
-      {                             // if there's bytes to read from the client,
-        char c = wificlient.read(); // read a byte, then
-        Serial.write(c);            // print it out the serial monitor
-        header += c;
-        if (c == '\n')
-        { // if the byte is a newline character
-          // if the current line is blank, you got two newline characters in a row.
-          // that's the end of the client HTTP request, so send a response:
-          if (currentLine.length() == 0)
-          {
-            // HTTP headers always start with a response code (e.g. HTTP/1.1 200 OK)
-            // and a content-type so the client knows what's coming, then a blank line:
-            wificlient.println("HTTP/1.1 200 OK");
-            wificlient.println("Content-type:text/html");
-            wificlient.println("Connection: close");
-            wificlient.println();
-
-            // turns the GPIOs on and off
-            if (header.indexOf("GET /5/on") >= 0)
-            {
-              Serial.println("GPIO 5 on");
-              output5State = "on";
-              digitalWrite(output5, HIGH);
-            }
-            else if (header.indexOf("GET /5/off") >= 0)
-            {
-              Serial.println("GPIO 5 off");
-              output5State = "off";
-              digitalWrite(output5, LOW);
-            }
-            else if (header.indexOf("GET /4/on") >= 0)
-            {
-              Serial.println("GPIO 4 on");
-              output4State = "on";
-              digitalWrite(output4, HIGH);
-            }
-            else if (header.indexOf("GET /4/off") >= 0)
-            {
-              Serial.println("GPIO 4 off");
-              output4State = "off";
-              digitalWrite(output4, LOW);
-            }
-
-            // Display the HTML web page
-            wificlient.println("<!DOCTYPE html><html>");
-            wificlient.println("<head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
-            wificlient.println("<link rel=\"icon\" href=\"data:,\">");
-            // CSS to style the on/off buttons
-            // Feel free to change the background-color and font-size attributes to fit your preferences
-            wificlient.println("<style>html { font-family: Helvetica; display: inline-block; margin: 0px auto; text-align: center;}");
-            wificlient.println(".button { background-color: #195B6A; border: none; color: white; padding: 16px 40px;");
-            wificlient.println("text-decoration: none; font-size: 30px; margin: 2px; cursor: pointer;}");
-            wificlient.println(".button2 {background-color: #77878A;}</style></head>");
-
-            // Web Page Heading
-            wificlient.println("<body><h1>ESP8266 Web Server</h1>");
-
-            // Display current state, and ON/OFF buttons for GPIO 5
-            wificlient.println("<p>GPIO 5 - State " + output5State + "</p>");
-            // If the output5State is off, it displays the ON button
-            if (output5State == "off")
-            {
-              wificlient.println("<p><a href=\"/5/on\"><button class=\"button\">ON</button></a></p>");
-            }
-            else
-            {
-              wificlient.println("<p><a href=\"/5/off\"><button class=\"button button2\">OFF</button></a></p>");
-            }
-
-            // Display current state, and ON/OFF buttons for GPIO 4
-            wificlient.println("<p>GPIO 4 - State " + output4State + "</p>");
-            // If the output4State is off, it displays the ON button
-            if (output4State == "off")
-            {
-              wificlient.println("<p><a href=\"/4/on\"><button class=\"button\">ON</button></a></p>");
-            }
-            else
-            {
-              wificlient.println("<p><a href=\"/4/off\"><button class=\"button button2\">OFF</button></a></p>");
-            }
-            wificlient.println("</body></html>");
-
-            // The HTTP response ends with another blank line
-            wificlient.println();
-            // Break out of the while loop
-            break;
-          }
-          else
-          { // if you got a newline, then clear currentLine
-            currentLine = "";
-          }
-        }
-        else if (c != '\r')
-        {                   // if you got anything else but a carriage return character,
-          currentLine += c; // add it to the end of the currentLine
-        }
-      }
-    }
-    // Clear the header variable
-    header = "";
-    // Close the connection
-    wificlient.stop();
-    Serial.println("Client disconnected.");
-    Serial.println("");
-  }
-
-  if (sendEmail("Mensaje enviado con NODEMCU"))
-  {
-    Serial.println(F("Email sent"));
-  }
-  else
-  {
-    Serial.println(F("Email failed"));
-  }
-
-  contMail++;
-  Serial.println(" En espera! ");
-  // ESP.deepSleep(TIEMPO_DeepSleep, WAKE_NO_RFCAL);
-
-  Serial.print("Email número: ");
-  Serial.println(contMail);
-
-  // MQTT //
-  if (!client.connected())
-  {
-    reconnect();
-  }
+  // --- D. SERVIDOR WEB Y MANTENIMIENTO ---
+  server.handleClient();
   client.loop();
-
-  // read DHT sensor, temp and humidity-------------------------------
-  t = dht.readTemperature();
-  h = dht.readHumidity();
-  if ((isnan(t)) || (isnan(h)))
-  {
-    Serial.println("Failed to read from DHT sensor!");
-  }
-
-  // MQTT 2//
-
-  if (!client.connected()) {
-    reconnect_mqtt();
-  }
-  client.loop();
-
-  unsigned long now = millis();
-  if (now - lastMsg > 2000) {
-    lastMsg = now;
-    value = analogRead(A0)*0.32;
-    snprintf (msg, MSG_BUFFER_SIZE, "Temperature is :%ld", value);
-    Serial.print("Publish message: ");
-    Serial.println(msg);
-    client.publish("device/temp", msg);
-  }
-
-
-// ====================== MENSAJES PROGRAMADOS ======================
-
-// variable estática para evitar reenvíos en el mismo minuto
-static int lastSentHour = -1;
-static int lastSentMinute = -1;
-
-// cuando sea la hora exacta (en minutos == 0)
-if (mm == 0 && (hh == 0 || hh == 9 || hh == 12 || hh == 16 || hh == 21)) {
-
-  // verificamos que no se haya enviado en este mismo minuto
-  if (lastSentHour != hh || lastSentMinute != mm) {
-
-    String mensaje = "Alerta automática: son las " + String(hh) + ":00 horas.";
-
-    // -------- CallMeBot (WhatsApp) --------
- // CALL ME BOT
-   sendMessageCallmebot(mensaje + " " + WiFi.macAddress() );
-
- // --------enviar correo --------
-
-enviarCorreo(mensaje + " " + WiFi.macAddress() );
-
-    // marcar que ya se envió en esta hora:minuto
-    lastSentHour = hh;
-    lastSentMinute = mm;
-  }
+  yield();
 }
 
+// --- WHATSAPP META (OFICIAL) ---
+void sendMessageMeta(int perc, int lit, String solar, String hora, int bat) {
+  if (WiFi.status() != WL_CONNECTED)
+    return;
 
-// ====================== ALERTAS TANQUE DE AGUA ======================
+  WiFiClientSecure client;
+  client.setInsecure();
+  client.setBufferSizes(1024, 1024); // REDUCE CONSUMO DE SSL EN RAM
+  HTTPClient http;
 
-// variable estática para evitar reenvíos en el mismo nivel
-static int lastTankLevel = -1;
+  String url =
+      "https://graph.facebook.com/v22.0/" + phoneNumberID + "/messages";
 
-  // función que retorna distancia en cm desde sensor
-//int nivel = map(intLevelPercent, intEmpty, intFull, 0, 100);  // 0% = vacío, 100% = lleno
-int nivel = map(intLevelPercent, intEmpty, intFull, 0, 100);  // 0% = vacío, 100% = lleno
-// limitar nivel entre 0 y 100
-nivel = constrain(nivel, 0, 100);
+  // Construir JSON para la plantilla iot_tanque_de_agua_con_espressif_arduino
+  // La plantilla requiere obligatoriamente un Header tipo IMAGE (Error #132012)
+  String headerImage = "https://raw.githubusercontent.com/Singularidad-Spectro/gitpod/refs/heads/master/sensortanque/sensoragua/coder%20pat.jfif";
+  
+  String payload =
+      "{ \"messaging_product\": \"whatsapp\", \"to\": \"51989168761\", "
+      "\"type\": \"template\", \"template\": { \"name\": \"" +
+      metaTemplate +
+      "\", \"language\": { \"code\": \"es_PE\" }, \"components\": [ "
+      "{ \"type\": \"header\", \"parameters\": [ { \"type\": \"image\", \"image\": { \"link\": \"" + headerImage + "\" } } ] }, "
+      "{ \"type\": \"body\", \"parameters\": [ ";
+  payload += "{ \"type\": \"text\", \"text\": \"" + String(perc) + "\" }, ";
+  payload += "{ \"type\": \"text\", \"text\": \"" + String(lit) + "\" }, ";
+  payload += "{ \"type\": \"text\", \"text\": \"" + solar + "\" }, ";
+  payload += "{ \"type\": \"text\", \"text\": \"" + hora + "\" }, ";
+  payload += "{ \"type\": \"text\", \"text\": \"" + String(bat) + "\" } ";
+  payload += "] } ] } }";
 
-// revisar solo si cambió de tramo (25, 50, 75, 100)
-if ((nivel >= 100 || nivel >= 75 || nivel >= 50 || nivel >= 25) && nivel != lastTankLevel) {
+  if (http.begin(client, url)) {
+    http.addHeader("Content-Type", "application/json");
+    http.addHeader("Authorization", "Bearer " + metaToken);
 
-  String mensajetanque = "Tanque de agua al " + String(nivel) + "%"   +" Con un volumen: "+intVolume +" litros";
-
-   // -------- CallMeBot (WhatsApp) --------
- // CALL ME BOT
-   sendMessageCallmebot(mensajetanque + " " + WiFi.macAddress() );
-
- // --------enviar correo --------
-
-enviarCorreo(mensajetanque + " " + WiFi.macAddress() );
-
-
-  // actualizar nivel enviado
-  lastTankLevel = nivel;
+    int httpResponseCode = http.POST(payload);
+    Serial.print("Meta HTTP Respuesta Código: ");
+    Serial.println(httpResponseCode);
+    
+    // Obtener la respuesta exacta de Meta para debugear, sea cual sea el resultado
+    String responseString = http.getString();
+    Serial.print("Meta HTTP Detalle JSON: ");
+    Serial.println(responseString);
+    
+    if (httpResponseCode != 200) {
+      Serial.println("!!! ADVERTENCIA: WhatsApp no enviado - Verifica el token, código de idioma (es_PE) o Plantilla aprobada.");
+      
+      // Enviamos el error de Meta directo y sin escalas al Email
+      String errorMsg = "Fallo envio WhatsApp.\n\nHTTP Code: " + String(httpResponseCode) + "\n\nRespuesta Meta:\n" + responseString;
+      enviarCorreo(errorMsg);
+    }
+    http.end();
+  }
+  client.stop(); // FUERZA LIBERACION DE RECURSOS DEL SISTEMA
 }
 
-
-
-}
-
-
-
-void enviarCorreo(String mensaje){
+void enviarCorreo(String mensaje) {
 
   // GMAIL SMPT ///
 
@@ -1321,7 +1140,8 @@ void enviarCorreo(String mensaje){
   For times east of the Prime Meridian use 0-12
   For times west of the Prime Meridian add 12 to the offset.
   Ex. American/Denver GMT would be -6. 6 + 12 = 18
-  See https://en.wikipedia.org/wiki/Time_zone for a list of the GMT/UTC timezone offsets
+  See https://en.wikipedia.org/wiki/Time_zone for a list of the GMT/UTC timezone
+  offsets
   */
   config.time.ntp_server = F("pool.ntp.org,time.nist.gov");
   config.time.gmt_offset = 3;
@@ -1337,8 +1157,8 @@ void enviarCorreo(String mensaje){
   message.addRecipient(F("Joffre"), RECIPIENT_EMAIL);
 
   /*Send HTML message*/
-  /*String htmlMsg = "<div style=\"color:#2f4468;\"><h1>Hello World!</h1><p>- Sent from ESP board</p></div>";
-  message.html.content = htmlMsg.c_str();
+  /*String htmlMsg = "<div style=\"color:#2f4468;\"><h1>Hello World!</h1><p>-
+  Sent from ESP board</p></div>"; message.html.content = htmlMsg.c_str();
   message.html.content = htmlMsg.c_str();
   message.text.charSet = "us-ascii";
   message.html.transfer_encoding = Content_Transfer_Encoding::enc_7bit;*/
@@ -1347,24 +1167,22 @@ void enviarCorreo(String mensaje){
   String textMsg = mensaje + "\nSSID conectado: " + ssid_conectado;
   message.text.content = textMsg.c_str();
   message.text.charSet = "us-ascii";
-  message.text.transfer_encoding = Content_Transfer_Encoding::enc_7bit;
+  message.text.transfer_encoding = "7bit";
 
-  message.priority = esp_mail_smtp_priority::esp_mail_smtp_priority_low;
-  message.response.notify = esp_mail_smtp_notify_success | esp_mail_smtp_notify_failure | esp_mail_smtp_notify_delay;
+  message.priority = (esp_mail_smtp_priority)3;
+  message.response.notify = 1 | 2 | 4;
 
   /* Connect to the server */
-  if (!smtp.connect(&config))
-  {
-    ESP_MAIL_PRINTF("Connection error, Status Code: %d, Error Code: %d, Reason: %s", smtp.statusCode(), smtp.errorCode(), smtp.errorReason().c_str());
+  if (!smtp.connect(&config)) {
+    ESP_MAIL_PRINTF(
+        "Connection error, Status Code: %d, Error Code: %d, Reason: %s",
+        smtp.statusCode(), smtp.errorCode(), smtp.errorReason().c_str());
     return;
   }
 
-  if (!smtp.isLoggedIn())
-  {
+  if (!smtp.isLoggedIn()) {
     Serial.println("\nNot yet logged in.");
-  }
-  else
-  {
+  } else {
     if (smtp.isAuthenticated())
       Serial.println("\nSuccessfully logged in.");
     else
@@ -1373,640 +1191,513 @@ void enviarCorreo(String mensaje){
 
   /* Start sending Email and close the session */
   if (!MailClient.sendMail(&smtp, &message))
-    ESP_MAIL_PRINTF("Error, Status Code: %d, Error Code: %d, Reason: %s", smtp.statusCode(), smtp.errorCode(), smtp.errorReason().c_str());
-
+    ESP_MAIL_PRINTF("Error, Status Code: %d, Error Code: %d, Reason: %s",
+                    smtp.statusCode(), smtp.errorCode(),
+                    smtp.errorReason().c_str());
 }
 
+void getTankStatus() {
 
-  void getTankStatus()
-  {
+  Serial.print("Get tank status");
+  Serial.print("Get tank status");
+  jsonDocument.clear();
+  jsonDocument["level"] = TANK_intLevel;
+  jsonDocument["volume"] = TANK_intVolume;
+  jsonDocument["WaterColumn"] = floatLevelCm;
+  serializeJson(jsonDocument, bufferJson);
+  server.send(200, "application/json", bufferJson);
+}
 
-    Serial.print("Get tank status");
-    Serial.print("Get tank status");
-    jsonDocument.clear();
-    jsonDocument["level"] = intLevel;
-    jsonDocument["volume"] = intVolume;
-    jsonDocument["WaterColumn"] = floatLevelCm;
-    serializeJson(jsonDocument, bufferJson);
-    server.send(200, "application/json", bufferJson);
+void handle_OnConnect() {
+  LEDstatus = LOW;
+  Serial.println("LED: OFF");
+  server.send(200, "text/html", updateWebpage(LEDstatus));
+}
+
+void handle_ledon() {
+  LEDstatus = HIGH;
+  Serial.println("LED: ON");
+  server.send(200, "text/html", updateWebpage(LEDstatus));
+}
+
+void handle_ledoff() {
+  LEDstatus = LOW;
+  Serial.println("LED: OFF");
+  server.send(200, "text/html", updateWebpage(LEDstatus));
+}
+
+void handle_NotFound() { server.send(404, "text/plain", "Not found"); }
+
+String updateWebpage(uint8_t LEDstatus) {
+  String ptr = "<!DOCTYPE html> <html>\n";
+  ptr += "<head><meta name=\"viewport\" content=\"width=device-width, "
+         "initial-scale=1.0, user-scalable=no\">\n";
+  ptr += "<title>CODER PATH ESP8266 PLATFORM</title>\n";
+  ptr += "<link rel='shortcut icon' "
+         "href='https://avatars.githubusercontent.com/u/"
+         "145310760?s=400&u=a8d4e2b367b3d851668f549621cec1c9aec5193b&v=4' />\n";
+  ptr += "<style>html {font-family: Helvetica; display: inline-block; margin: "
+         "0px auto; text-align: center;}\n";
+  ptr += "body{margin-top: 50px;} h1 {color: #444444;margin: 50px auto 30px;} "
+         "h3 {color: #444444;margin-bottom: 50px;}\n";
+  ptr +=
+      ".button {display: block;width: 80px;background-color: #1abc9c;border: "
+      "none;color: white;padding: 13px 30px;text-decoration: none;font-size: "
+      "25px;margin: 0px auto 35px;cursor: pointer;border-radius: 4px;}\n";
+  ptr += ".button-on {background-color: #3498db;}\n";
+  ptr += ".button-on:active {background-color: #3498db;}\n";
+  ptr += ".button-off {background-color: #34495e;}\n";
+  ptr += ".button-off:active {background-color: #2c3e50;}\n";
+  ptr += "p {font-size: 14px;color: #888;margin-bottom: 10px;}\n";
+  ptr += "</style>\n";
+  ptr += "</head>\n";
+  ptr += "<body>\n";
+  ptr += "<h1>ESP8266 Web Server</h1>\n";
+  ptr += "<h3>CODER PATH JOFFRE HERMOSILLA SALAS [DEVELOPER] </h3><img "
+         "src='https://raw.githubusercontent.com/Hackathon-ChatGPT-NTTDATA/"
+         "eurekaserver/master/src/main/resources/fotocreador/"
+         "spring-logo-eureka.png' alt='CODER PATH' /> \n";
+  ptr += "<h1> </h1>\n";
+  ptr += "<a href='http://192.168.1.184/tankStatus'>TANQUE DE AGUA</a>\n";
+  ptr += "<h1> </h1>\n";
+  ptr += "<a href='/tankStatus'>Dos botones</a>\n";
+  if (LEDstatus) {
+    ptr += "<p>BLUE LED: ON</p><a class=\"button button-off\" "
+           "href=\"/ledoff\">OFF</a>\n";
+  } else {
+    ptr += "<p>BLUE LED: OFF</p><a class=\"button button-on\" "
+           "href=\"/ledon\">ON</a>\n";
   }
 
-  void handle_OnConnect()
-  {
-    LEDstatus = LOW;
-    Serial.println("LED: OFF");
-    server.send(200, "text/html", updateWebpage(LEDstatus));
-  }
+  ptr += "</body>\n";
+  ptr += "</html>\n";
+  return ptr;
+}
 
-  void handle_ledon()
-  {
-    LEDstatus = HIGH;
-    Serial.println("LED: ON");
-    server.send(200, "text/html", updateWebpage(LEDstatus));
-  }
+// Removed manual 587/SMTP2GO block to consolidate on ESP_Mail_Client (GMAIL)
 
-  void handle_ledoff()
-  {
-    LEDstatus = LOW;
-    Serial.println("LED: OFF");
-    server.send(200, "text/html", updateWebpage(LEDstatus));
-  }
+/* Callback function to get the Email sending status */
+void smtpCallback(SMTP_Status status) {
+  /* Print the current status */
+  Serial.println(status.info());
 
-  void handle_NotFound()
-  {
-    server.send(404, "text/plain", "Not found");
-  }
+  /* Print the sending result */
+  if (status.success()) {
+    // ESP_MAIL_PRINTF used in the examples is for format printing via debug
+    // Serial port that works for all supported Arduino platform SDKs e.g. AVR,
+    // SAMD, ESP32 and ESP8266. In ESP8266 and ESP32, you can use Serial.printf
+    // directly.
 
-  String updateWebpage(uint8_t LEDstatus)
-  {
-    String ptr = "<!DOCTYPE html> <html>\n";
-    ptr += "<head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0, user-scalable=no\">\n";
-    ptr += "<title>CODER PATH ESP8266 PLATFORM</title>\n";
-    ptr += "<link rel='shortcut icon' href='https://avatars.githubusercontent.com/u/145310760?s=400&u=a8d4e2b367b3d851668f549621cec1c9aec5193b&v=4' />\n";
-    ptr += "<style>html {font-family: Helvetica; display: inline-block; margin: 0px auto; text-align: center;}\n";
-    ptr += "body{margin-top: 50px;} h1 {color: #444444;margin: 50px auto 30px;} h3 {color: #444444;margin-bottom: 50px;}\n";
-    ptr += ".button {display: block;width: 80px;background-color: #1abc9c;border: none;color: white;padding: 13px 30px;text-decoration: none;font-size: 25px;margin: 0px auto 35px;cursor: pointer;border-radius: 4px;}\n";
-    ptr += ".button-on {background-color: #3498db;}\n";
-    ptr += ".button-on:active {background-color: #3498db;}\n";
-    ptr += ".button-off {background-color: #34495e;}\n";
-    ptr += ".button-off:active {background-color: #2c3e50;}\n";
-    ptr += "p {font-size: 14px;color: #888;margin-bottom: 10px;}\n";
-    ptr += "</style>\n";
-    ptr += "</head>\n";
-    ptr += "<body>\n";
-    ptr += "<h1>ESP8266 Web Server</h1>\n";
-    ptr += "<h3>CODER PATH JOFFRE HERMOSILLA SALAS [DEVELOPER] </h3><img src='https://raw.githubusercontent.com/Hackathon-ChatGPT-NTTDATA/eurekaserver/master/src/main/resources/fotocreador/spring-logo-eureka.png' alt='CODER PATH' /> \n";
-    ptr += "<h1> </h1>\n";
-    ptr += "<a href='http://192.168.1.184/tankStatus'>TANQUE DE AGUA</a>\n";
-    ptr += "<h1> </h1>\n";
-    ptr += "<a href='/tankStatus'>Dos botones</a>\n";
-    if (LEDstatus)
-    {
-      ptr += "<p>BLUE LED: ON</p><a class=\"button button-off\" href=\"/ledoff\">OFF</a>\n";
+    Serial.println("----------------");
+    ESP_MAIL_PRINTF("Message sent success: %d\n", status.completedCount());
+    ESP_MAIL_PRINTF("Message sent failed: %d\n", status.failedCount());
+    Serial.println("----------------\n");
+
+    for (size_t i = 0; i < smtp.sendingResult.size(); i++) {
+      /* Get the result item */
+      SMTP_Result result = smtp.sendingResult.getItem(i);
+
+      // In case, ESP32, ESP8266 and SAMD device, the timestamp get from
+      // result.timestamp should be valid if your device time was synched with
+      // NTP server. Other devices may show invalid timestamp as the device time
+      // was not set i.e. it will show Jan 1, 1970. You can call
+      // smtp.setSystemTime(xxx) to set device time manually. Where xxx is
+      // timestamp (seconds since Jan 1, 1970)
+
+      ESP_MAIL_PRINTF("Message No: %d\n", i + 1);
+      ESP_MAIL_PRINTF("Status: %s\n", result.completed ? "success" : "failed");
+      ESP_MAIL_PRINTF(
+          "Date/Time: %s\n",
+          MailClient.Time
+              .getDateTimeString(result.timestamp, "%B %d, %Y %H:%M:%S")
+              .c_str());
+      ESP_MAIL_PRINTF("Recipient: %s\n", result.recipients.c_str());
+      ESP_MAIL_PRINTF("Subject: %s\n", result.subject.c_str());
     }
+    Serial.println("----------------\n");
+
+    // You need to clear sending result as the memory usage will grow up.
+    smtp.sendingResult.clear();
+  }
+}
+
+void gmail_configuration() {
+
+  /*  Set the network reconnection option */
+  MailClient.networkReconnect(true);
+
+  /** Enable the debug via Serial port
+   * 0 for no debugging
+   * 1 for basic level debugging
+   *
+   * Debug port can be changed via ESP_MAIL_DEFAULT_DEBUG_PORT in ESP_Mail_FS.h
+   */
+  smtp.debug(1);
+
+  /* Set the callback function to get the sending results */
+  smtp.callback(smtpCallback);
+
+  /* Declare the Session_Config for user defined session credentials */
+  Session_Config config;
+
+  /* Set the session config */
+  config.server.host_name = SMTP_HOST;
+  config.server.port = SMTP_PORT;
+  config.login.email = AUTHOR_EMAIL;
+  config.login.password = AUTHOR_PASSWORD;
+  config.login.user_domain = "";
+
+  /*
+  Set the NTP config time
+  For times east of the Prime Meridian use 0-12
+  For times west of the Prime Meridian add 12 to the offset.
+  Ex. American/Denver GMT would be -6. 6 + 12 = 18
+  See https://en.wikipedia.org/wiki/Time_zone for a list of the GMT/UTC timezone
+  offsets
+  */
+  config.time.ntp_server = F("pool.ntp.org,time.nist.gov");
+  config.time.gmt_offset = 3;
+  config.time.day_light_offset = 0;
+
+  /* Declare the message class */
+  SMTP_Message message;
+
+  /* Set the message headers */
+  message.sender.name = F("ESP");
+  message.sender.email = AUTHOR_EMAIL;
+  message.subject = F("ESP Test Email");
+  message.addRecipient(F("Sara"), RECIPIENT_EMAIL);
+
+  /*Send HTML message*/
+  /*String htmlMsg = "<div style=\"color:#2f4468;\"><h1>Hello World!</h1><p>-
+  Sent from ESP board</p></div>"; message.html.content = htmlMsg.c_str();
+  message.html.content = htmlMsg.c_str();
+  message.text.charSet = "us-ascii";
+  message.html.transfer_encoding = Content_Transfer_Encoding::enc_7bit;*/
+
+  // Send raw text message
+  String textMsg = "Hello World! - Sent from ESP board";
+  message.text.content = textMsg.c_str();
+  message.text.charSet = "us-ascii";
+  message.text.transfer_encoding = "7bit";
+
+  message.priority = (esp_mail_smtp_priority)3;
+  message.response.notify = 1 | 2 | 4;
+
+  /* Connect to the server */
+  if (!smtp.connect(&config)) {
+    ESP_MAIL_PRINTF(
+        "Connection error, Status Code: %d, Error Code: %d, Reason: %s",
+        smtp.statusCode(), smtp.errorCode(), smtp.errorReason().c_str());
+    return;
+  }
+
+  if (!smtp.isLoggedIn()) {
+    Serial.println("\nNot yet logged in.");
+  } else {
+    if (smtp.isAuthenticated())
+      Serial.println("\nSuccessfully logged in.");
     else
-    {
-      ptr += "<p>BLUE LED: OFF</p><a class=\"button button-on\" href=\"/ledon\">ON</a>\n";
-    }
-
-    ptr += "</body>\n";
-    ptr += "</html>\n";
-    return ptr;
+      Serial.println("\nConnected with no Auth.");
   }
 
-  byte sendEmail(String x)
-  {
-    WiFiClient client = server.client();
-    if (client.connect("mail.smtp2go.com", 587) == 1)
-    {
-      Serial.println(F("connected"));
-    }
-    else
-    {
-      Serial.println(F("connection failed"));
-      return 0;
-    }
+  /* Start sending Email and close the session */
+  if (!MailClient.sendMail(&smtp, &message))
+    ESP_MAIL_PRINTF("Error, Status Code: %d, Error Code: %d, Reason: %s",
+                    smtp.statusCode(), smtp.errorCode(),
+                    smtp.errorReason().c_str());
+}
 
-    if (!eRcv(client))
-      return 0;
-    Serial.println(F("--- Sending EHLO"));
-    client.println("EHLO 1.2.3.4");
-    if (!eRcv(client))
-      return 0;
-    Serial.println(F("--- Sending login"));
-    client.println("AUTH LOGIN");
-    if (!eRcv(client))
-      return 0;
-    Serial.println(F("--- Sending User base64"));
-    client.println(user_base64);
-    if (!eRcv(client))
-      return 0;
-    Serial.println(F("--- Sending Password base64"));
-    client.println(user_password_base64);
-    if (!eRcv(client))
-      return 0;
-    Serial.println(F("--- Sending From"));
-    client.println(from_email);
-    if (!eRcv(client))
-      return 0;
-    Serial.println(F("--- Sending To"));
-    client.println(to_email);
-    if (!eRcv(client))
-      return 0;
-    Serial.println(F("--- Sending DATA"));
-    client.println(F("DATA"));
-    if (!eRcv(client))
-      return 0;
-    client.println(F("Subject: E-mail prueba NODEMCU\r\n"));
-    client.println(x);
-    client.println(F("."));
+void onServerResponseReceived(String message) { Serial.println(message); }
 
-    if (!eRcv(client))
-      return 0;
-    Serial.println(F("--- Sending QUIT"));
-    client.println(F("QUIT"));
-    if (!eRcv(client))
-      return 0;
-    client.stop();
-    return 1;
+void onMessageReceived(String message) {
+  message.toUpperCase();
+  Serial.println(message);
+
+  if (message.equals("START")) {
+    Serial.println("Comando recibido: Starting");
+  } else if (message.equals("STOP")) {
+    Serial.println("Comando recibido: Stopping");
+  } else if (message.equals("PAUSE")) {
+    Serial.println("Comando recibido: Pausing");
+  } else if (message.equals("RESUME")) {
+    Serial.println("Comando recibido: Resumming");
+  } else {
+    Serial.println("Comando desconocido");
   }
+}
 
-  byte eRcv(WiFiClient client)
-  {
-    byte respCode;
-    byte thisByte;
-    int loopCount = 0;
+void setup_wifi() {
+  delay(100);
+  // We start by connecting to a WiFi network
+  Serial.print("Connecting to ");
+  Serial.println(redes[0].ssid);
+  conectarWiFiDinamico();
+  randomSeed(micros());
+  Serial.println("");
+  Serial.println("WiFi connected");
+  Serial.println("IP address: ");
+  Serial.println(WiFi.localIP());
+}
 
-    while (!client.available())
-    {
-      delay(1);
-      loopCount++;
-      if (loopCount > 10000)
-      {
-        client.stop();
-        Serial.println(F("\r\nTimeout"));
-        return 0;
-      }
-    }
-
-    respCode = client.peek();
-    while (client.available())
-    {
-      thisByte = client.read();
-      Serial.write(thisByte);
-    }
-    if (respCode >= '4')
-      return 0;
-    return 1;
+void callback(char *topic, byte *payload, unsigned int length) {
+  // Receiving message as subscriber
+  Serial.print("Message arrived in topic: ");
+  Serial.println(topic);
+  String json_received;
+  Serial.print("JSON Received:");
+  for (int i = 0; i < length; i++) {
+    json_received += ((char)payload[i]);
+    // Serial.print((char)payload[i]);
   }
+  Serial.println(json_received);
+  // if receive ask status from node-red, send current status of lamps
+  if (json_received == "Status") {
+    check_stat();
+  } else {
+    // Parse json
+    // StaticJsonBuffer<200> jsonBuffer;  //arudion json v5
+    // JsonObject& root = jsonBuffer.parseObject(json_received);
 
-  /* Callback function to get the Email sending status */
-  void smtpCallback(SMTP_Status status)
-  {
-    /* Print the current status */
-    Serial.println(status.info());
-
-    /* Print the sending result */
-    if (status.success())
-    {
-      // ESP_MAIL_PRINTF used in the examples is for format printing via debug Serial port
-      // that works for all supported Arduino platform SDKs e.g. AVR, SAMD, ESP32 and ESP8266.
-      // In ESP8266 and ESP32, you can use Serial.printf directly.
-
-      Serial.println("----------------");
-      ESP_MAIL_PRINTF("Message sent success: %d\n", status.completedCount());
-      ESP_MAIL_PRINTF("Message sent failed: %d\n", status.failedCount());
-      Serial.println("----------------\n");
-
-      for (size_t i = 0; i < smtp.sendingResult.size(); i++)
-      {
-        /* Get the result item */
-        SMTP_Result result = smtp.sendingResult.getItem(i);
-
-        // In case, ESP32, ESP8266 and SAMD device, the timestamp get from result.timestamp should be valid if
-        // your device time was synched with NTP server.
-        // Other devices may show invalid timestamp as the device time was not set i.e. it will show Jan 1, 1970.
-        // You can call smtp.setSystemTime(xxx) to set device time manually. Where xxx is timestamp (seconds since Jan 1, 1970)
-
-        ESP_MAIL_PRINTF("Message No: %d\n", i + 1);
-        ESP_MAIL_PRINTF("Status: %s\n", result.completed ? "success" : "failed");
-        ESP_MAIL_PRINTF("Date/Time: %s\n", MailClient.Time.getDateTimeString(result.timestamp, "%B %d, %Y %H:%M:%S").c_str());
-        ESP_MAIL_PRINTF("Recipient: %s\n", result.recipients.c_str());
-        ESP_MAIL_PRINTF("Subject: %s\n", result.subject.c_str());
-      }
-      Serial.println("----------------\n");
-
-      // You need to clear sending result as the memory usage will grow up.
-      smtp.sendingResult.clear();
-    }
-  }
-
-  void gmail_configuration()
-  {
-
-    /*  Set the network reconnection option */
-    MailClient.networkReconnect(true);
-
-    /** Enable the debug via Serial port
-     * 0 for no debugging
-     * 1 for basic level debugging
-     *
-     * Debug port can be changed via ESP_MAIL_DEFAULT_DEBUG_PORT in ESP_Mail_FS.h
-     */
-    smtp.debug(1);
-
-    /* Set the callback function to get the sending results */
-    smtp.callback(smtpCallback);
-
-    /* Declare the Session_Config for user defined session credentials */
-    Session_Config config;
-
-    /* Set the session config */
-    config.server.host_name = SMTP_HOST;
-    config.server.port = SMTP_PORT;
-    config.login.email = AUTHOR_EMAIL;
-    config.login.password = AUTHOR_PASSWORD;
-    config.login.user_domain = "";
-
-    /*
-    Set the NTP config time
-    For times east of the Prime Meridian use 0-12
-    For times west of the Prime Meridian add 12 to the offset.
-    Ex. American/Denver GMT would be -6. 6 + 12 = 18
-    See https://en.wikipedia.org/wiki/Time_zone for a list of the GMT/UTC timezone offsets
-    */
-    config.time.ntp_server = F("pool.ntp.org,time.nist.gov");
-    config.time.gmt_offset = 3;
-    config.time.day_light_offset = 0;
-
-    /* Declare the message class */
-    SMTP_Message message;
-
-    /* Set the message headers */
-    message.sender.name = F("ESP");
-    message.sender.email = AUTHOR_EMAIL;
-    message.subject = F("ESP Test Email");
-    message.addRecipient(F("Sara"), RECIPIENT_EMAIL);
-
-    /*Send HTML message*/
-    /*String htmlMsg = "<div style=\"color:#2f4468;\"><h1>Hello World!</h1><p>- Sent from ESP board</p></div>";
-    message.html.content = htmlMsg.c_str();
-    message.html.content = htmlMsg.c_str();
-    message.text.charSet = "us-ascii";
-    message.html.transfer_encoding = Content_Transfer_Encoding::enc_7bit;*/
-
-    // Send raw text message
-    String textMsg = "Hello World! - Sent from ESP board";
-    message.text.content = textMsg.c_str();
-    message.text.charSet = "us-ascii";
-    message.text.transfer_encoding = Content_Transfer_Encoding::enc_7bit;
-
-    message.priority = esp_mail_smtp_priority::esp_mail_smtp_priority_low;
-    message.response.notify = esp_mail_smtp_notify_success | esp_mail_smtp_notify_failure | esp_mail_smtp_notify_delay;
-
-    /* Connect to the server */
-    if (!smtp.connect(&config))
-    {
-      ESP_MAIL_PRINTF("Connection error, Status Code: %d, Error Code: %d, Reason: %s", smtp.statusCode(), smtp.errorCode(), smtp.errorReason().c_str());
-      return;
-    }
-
-    if (!smtp.isLoggedIn())
-    {
-      Serial.println("\nNot yet logged in.");
-    }
-    else
-    {
-      if (smtp.isAuthenticated())
-        Serial.println("\nSuccessfully logged in.");
-      else
-        Serial.println("\nConnected with no Auth.");
-    }
-
-    /* Start sending Email and close the session */
-    if (!MailClient.sendMail(&smtp, &message))
-      ESP_MAIL_PRINTF("Error, Status Code: %d, Error Code: %d, Reason: %s", smtp.statusCode(), smtp.errorCode(), smtp.errorReason().c_str());
-  }
-
-  void onServerResponseReceived(String message)
-  {
-    Serial.println(message);
-  }
-
-  void onMessageReceived(String message)
-  {
-    message.toUpperCase();
-    Serial.println(message);
-
-    if (message.equals("START"))
-    {
-      whatabotClient.sendMessageWS("Starting");
-      // Add your logic for starting here
-    }
-    else if (message.equals("STOP"))
-    {
-      whatabotClient.sendMessageWS("Stopping");
-      // Add your logic for stopping here
-    }
-    else if (message.equals("PAUSE"))
-    {
-      whatabotClient.sendMessageWS("Pausing");
-      // Add your logic for pausing here
-    }
-    else if (message.equals("RESUME"))
-    {
-      whatabotClient.sendMessageWS("Resumming");
-      // Add your logic for resuming here
-    }
-    else
-    {
-      whatabotClient.sendMessageWS("Unknown command");
-      // Handle unknown commands here (optional)
-    }
-  }
-
-  void setup_wifi()
-  {
-    delay(100);
-    // We start by connecting to a WiFi network
-    Serial.print("Connecting to ");
-    Serial.println(redes[0].ssid);
-    conectarWiFiDinamico();
-    randomSeed(micros());
-    Serial.println("");
-    Serial.println("WiFi connected");
-    Serial.println("IP address: ");
-    Serial.println(WiFi.localIP());
-  }
-
-  void callback(char *topic, byte *payload, unsigned int length)
-  {
-    // Receiving message as subscriber
-    Serial.print("Message arrived in topic: ");
-    Serial.println(topic);
-    String json_received;
-    Serial.print("JSON Received:");
-    for (int i = 0; i < length; i++)
-    {
-      json_received += ((char)payload[i]);
-      // Serial.print((char)payload[i]);
-    }
-    Serial.println(json_received);
-    // if receive ask status from node-red, send current status of lamps
-    if (json_received == "Status")
-    {
-      check_stat();
-    }
-    else
-    {
-      // Parse json
-      // StaticJsonBuffer<200> jsonBuffer;  //arudion json v5
-      // JsonObject& root = jsonBuffer.parseObject(json_received);
-
-      JsonDocument doc;
-      // JsonObject& JSONencoder = JSONbuffer.createObject();
-      JsonObject root = doc.to<JsonObject>();
-
-      // get json parsed value
-      // sample of json: {"device":"Lamp1","trigger":"on"}
-      Serial.print("Command:");
-      String device = root["device"];
-      String trigger = root["trigger"];
-      Serial.println("Turn " + trigger + " " + device);
-      Serial.println("-----------------------");
-      // Trigger device
-      // Lamp1***************************
-      if (device == "Lamp1")
-      {
-        if (trigger == "on")
-        {
-          digitalWrite(lamp1, LOW);
-        }
-        else
-        {
-          digitalWrite(lamp1, HIGH);
-        }
-      }
-      // Lamp2***************************
-      if (device == "Lamp2")
-      {
-        if (trigger == "on")
-        {
-          digitalWrite(lamp2, LOW);
-        }
-        else
-        {
-          digitalWrite(lamp2, HIGH);
-        }
-      }
-      // Lamp3***************************
-      if (device == "Lamp3")
-      {
-        if (trigger == "on")
-        {
-          digitalWrite(lamp3, LOW);
-        }
-        else
-        {
-          digitalWrite(lamp3, HIGH);
-        }
-      }
-      // All***************************
-      if (device == "All")
-      {
-        if (trigger == "on")
-        {
-          digitalWrite(lamp1, LOW);
-          digitalWrite(lamp2, LOW);
-          digitalWrite(lamp3, LOW);
-        }
-        else
-        {
-          digitalWrite(lamp1, HIGH);
-          digitalWrite(lamp2, HIGH);
-          digitalWrite(lamp3, HIGH);
-        }
-      }
-      check_stat();
-    }
-  }
-
-  void reconnect()
-  {
-    // Loop until we're reconnected
-    while (!client.connected())
-    {
-      Serial.print("Attempting MQTT connection...");
-      // Create a random client ID
-      String clientId = "ESP8266Client-";
-      clientId += String(random(0xffff), HEX);
-      // Attempt to connect
-      // if you MQTT broker has clientID,username and password
-      // please change following line to    if (client.connect(clientId,userName,passWord))
-      if (client.connect(clientId.c_str()))
-      {
-        Serial.println("connected");
-        // once connected to MQTT broker, subscribe command if any
-        client.subscribe(topic_sub);
-        check_stat();
-      }
-      else
-      {
-        Serial.print("failed, rc=");
-        Serial.print(client.state());
-        Serial.println(" try again in 5 seconds");
-        // Wait 5 seconds before retrying
-        delay(5000);
-      }
-    }
-  }
-
-  void check_stat()
-  {
-    // check output status--------------------------------------------
-    // This function will update lamp status to mqtt
-    // StaticJsonBuffer<300> JSONbuffer; //arudion json v5
     JsonDocument doc;
     // JsonObject& JSONencoder = JSONbuffer.createObject();
-    JsonObject JSONencoder = doc.to<JsonObject>();
+    JsonObject root = doc.to<JsonObject>();
 
-    bool stat_lamp1 = digitalRead(lamp1);
-    bool stat_lamp2 = digitalRead(lamp2);
-    bool stat_lamp3 = digitalRead(lamp3);
-    // lamp1==========================
-    if (stat_lamp1 == false)
-    {
-      JSONencoder["lamp1"] = true;
-    }
-    else
-    {
-      JSONencoder["lamp1"] = false;
-    }
-    // lamp2==========================
-    if (stat_lamp2 == false)
-    {
-      JSONencoder["lamp2"] = true;
-    }
-    else
-    {
-      JSONencoder["lamp2"] = false;
-    }
-    // lamp3==========================
-    if (stat_lamp3 == false)
-    {
-      JSONencoder["lamp3"] = true;
-    }
-    else
-    {
-      JSONencoder["lamp3"] = false;
-    }
-
-    JSONencoder["device"] = "ESP8266";
-    JSONencoder["temperature"] = t;
-    JSONencoder["humidity"] = h;
-
-    char JSONmessageBuffer[100];
-    // JSONencoder.printTo(JSONmessageBuffer, sizeof(JSONmessageBuffer));// arduion json v5
-    // serializeJson(JSONmessageBuffer);
-
-    Serial.println("Sending message to MQTT topic..");
-    Serial.println(JSONmessageBuffer);
-    // JSONencoder.printTo(JSONmessageBuffer, sizeof(JSONmessageBuffer));
-    // serializeJson(JSONmessageBuffer);
-    if (client.publish(topic_pub, JSONmessageBuffer) == true)
-    {
-      Serial.println("Success sending message");
-    }
-    else
-    {
-      Serial.println("Error sending message");
-    }
-    Serial.println("-------------");
-  }
-
-  void setup_wifi_mqtt()
-  {
-
-    delay(10);
-    // We start by connecting to a WiFi network
-    Serial.println();
-    Serial.print("Connecting to ");
-    Serial.println(redes[0].ssid);
-
-    conectarWiFiDinamico();
-
-    randomSeed(micros());
-
-    Serial.println("");
-    Serial.println("WiFi connected");
-    Serial.println("IP address: ");
-    Serial.println(WiFi.localIP());
-  }
-
-  void callback_mqtt(char *topic, byte *payload, unsigned int length)
-  {
-    Serial.print("Message arrived [");
-    Serial.print(topic);
-    Serial.print("] ");
-    for (int i = 0; i < length; i++)
-    {
-      Serial.print((char)payload[i]);
-    }
-    Serial.println();
-
-    // Switch on the LED if an 1 was received as first character
-    if ((char)payload[0] == '1')
-    {
-      digitalWrite(BUILTIN_LED, LOW); // Turn the LED on (Note that LOW is the voltage level
-      // but actually the LED is on; this is because
-      // it is active low on the ESP-01)
-    }
-    else
-    {
-      digitalWrite(BUILTIN_LED, HIGH); // Turn the LED off by making the voltage HIGH
-    }
-  }
-
-  void reconnect_mqtt()
-  {
-    // Loop until we're reconnected
-    while (!client.connected())
-    {
-      Serial.print("Attempting MQTT connection...");
-      // Create a random client ID
-      String clientId = "ESP8266Client-";
-      clientId += String(random(0xffff), HEX);
-      // Attempt to connect
-      if (client.connect(clientId.c_str()))
-      {
-        Serial.println("connected");
-        // Once connected, publish an announcement...
-        client.publish("device/temp", "MQTT Server is Connected");
-        // ... and resubscribe
-        client.subscribe("device/led");
-      }
-      else
-      {
-        Serial.print("failed, rc=");
-        Serial.print(client.state());
-        Serial.println(" try again in 5 seconds");
-        // Wait 5 seconds before retrying
-        delay(5000);
+    // get json parsed value
+    // sample of json: {"device":"Lamp1","trigger":"on"}
+    Serial.print("Command:");
+    String device = root["device"];
+    String trigger = root["trigger"];
+    Serial.println("Turn " + trigger + " " + device);
+    Serial.println("-----------------------");
+    // Trigger device
+    // Lamp1***************************
+    if (device == "Lamp1") {
+      if (trigger == "on") {
+        digitalWrite(lamp1, LOW);
+      } else {
+        digitalWrite(lamp1, HIGH);
       }
     }
+    // Lamp2***************************
+    else if (device == "Lamp2") {
+      if (trigger == "on") {
+        digitalWrite(lamp2, LOW);
+      } else {
+        digitalWrite(lamp2, HIGH);
+      }
+    }
+    // Lamp3***************************
+    else if (device == "Lamp3") {
+      if (trigger == "on") {
+        digitalWrite(lamp3, LOW);
+      } else {
+        digitalWrite(lamp3, HIGH);
+      }
+    }
+    // Tank Sensor Data Receiver ***************************
+    else if (device == "Tank") {
+      // Payload example: {"device": "Tank", "level": 85, "volume": 1200, "cm":
+      // 150}
+      if (root.containsKey("level"))
+        TANK_level_percent = TANK_intLevel = root["level"];
+      if (root.containsKey("volume"))
+        TANK_intVolume = root["volume"];
+      if (root.containsKey("cm"))
+        floatLevelCm = TANK_intLevelCm = root["cm"];
+
+      Serial.println("Updated Tank data via MQTT:");
+      Serial.print("Level: ");
+      Serial.print(TANK_intLevel);
+      Serial.println("%");
+      Serial.print("Volume: ");
+      Serial.print(TANK_intVolume);
+      Serial.println("L");
+    }
+    // All***************************
+    else if (device == "All") {
+      if (trigger == "on") {
+        digitalWrite(lamp1, LOW);
+        digitalWrite(lamp2, LOW);
+        digitalWrite(lamp3, LOW);
+      } else {
+        digitalWrite(lamp1, HIGH);
+        digitalWrite(lamp2, HIGH);
+        digitalWrite(lamp3, HIGH);
+      }
+    }
+    check_stat();
+  }
+}
+
+void reconnect() {
+  // Loop until we're reconnected
+  while (!client.connected()) {
+    Serial.print("Attempting MQTT connection...");
+    // Create a random client ID
+    String clientId = "ESP8266Client-";
+    clientId += String(random(0xffff), HEX);
+    // Attempt to connect
+    // if you MQTT broker has clientID,username and password
+    // please change following line to    if
+    // (client.connect(clientId,userName,passWord))
+    if (client.connect(clientId.c_str())) {
+      Serial.println("connected");
+      // once connected to MQTT broker, subscribe command if any
+      client.subscribe(topic_sub);
+      check_stat();
+    } else {
+      Serial.print("failed, rc=");
+      Serial.print(client.state());
+      Serial.println(" try again in 5 seconds");
+      // Wait 5 seconds before retrying
+      delay(5000);
+    }
+  }
+}
+
+void check_stat() {
+  // check output status--------------------------------------------
+  // This function will update lamp status to mqtt
+  // StaticJsonBuffer<300> JSONbuffer; //arudion json v5
+  JsonDocument doc;
+  // JsonObject& JSONencoder = JSONbuffer.createObject();
+  JsonObject JSONencoder = doc.to<JsonObject>();
+
+  bool stat_lamp1 = digitalRead(lamp1);
+  bool stat_lamp2 = digitalRead(lamp2);
+  bool stat_lamp3 = digitalRead(lamp3);
+  // lamp1==========================
+  if (stat_lamp1 == false) {
+    JSONencoder["lamp1"] = true;
+  } else {
+    JSONencoder["lamp1"] = false;
+  }
+  // lamp2==========================
+  if (stat_lamp2 == false) {
+    JSONencoder["lamp2"] = true;
+  } else {
+    JSONencoder["lamp2"] = false;
+  }
+  // lamp3==========================
+  if (stat_lamp3 == false) {
+    JSONencoder["lamp3"] = true;
+  } else {
+    JSONencoder["lamp3"] = false;
   }
 
+  JSONencoder["device"] = "ESP8266";
 
+  char JSONmessageBuffer[100];
+  // JSONencoder.printTo(JSONmessageBuffer, sizeof(JSONmessageBuffer));//
+  // arduion json v5 serializeJson(JSONmessageBuffer);
 
-void createDial (){
+  Serial.println("Sending message to MQTT topic..");
+  Serial.println(JSONmessageBuffer);
+  // JSONencoder.printTo(JSONmessageBuffer, sizeof(JSONmessageBuffer));
+  // serializeJson(JSONmessageBuffer);
+  if (client.publish(topic_pub, JSONmessageBuffer) == true) {
+    Serial.println("Success sending message");
+  } else {
+    Serial.println("Error sending message");
+  }
+  Serial.println("-------------");
+}
 
-   tft.setTextColor (WHITE, GREY);  
-   tft.fillCircle(120, 120, 118, BORDEAUX);                                           // creates outer ring
-   tft.fillCircle(120, 120, 110, BLACK);   
+void setup_wifi_mqtt() {
 
-   for (int i = 0; i<360; i+= 30)                                                     // draw 12 line segments at the outer ring 
-      {                                                   
-      sx = cos((i-90)*DEG2RAD);
-      sy = sin((i-90)*DEG2RAD);
-      x0 = sx*114+120;
-      yy0 = sy*114+120;
-      x1 = sx*100+120;
-      yy1 = sy*100+120;
-      tft.drawLine(x0, yy0, x1, yy1, GREEN);
-      }
-                                                             
-   for (int i = 0; i<360; i+= 6)                                                      // draw 60 dots - minute markers
-      {
-      sx = cos((i-90)*DEG2RAD);
-      sy = sin((i-90)*DEG2RAD);
-      x0 = sx*102+120;
-      yy0 = sy*102+120;    
-      tft.drawPixel(x0, yy0, WHITE);
-    
-      if(i==0  || i==180) tft.fillCircle (x0, yy0, 2, WHITE);                         // draw main quadrant dots
-      if(i==90 || i==270) tft.fillCircle (x0, yy0, 2, WHITE);
-     }
-  
-   tft.fillCircle(120, 121, 3, WHITE);                                               // pivot
-   targetTime = millis() + 1000;   
+  delay(10);
+  // We start by connecting to a WiFi network
+  Serial.println();
+  Serial.print("Connecting to ");
+  Serial.println(redes[0].ssid);
+
+  conectarWiFiDinamico();
+
+  randomSeed(micros());
+
+  Serial.println("");
+  Serial.println("WiFi connected");
+  Serial.println("IP address: ");
+  Serial.println(WiFi.localIP());
+}
+
+void callback_mqtt(char *topic, byte *payload, unsigned int length) {
+  Serial.print("Message arrived [");
+  Serial.print(topic);
+  Serial.print("] ");
+  for (int i = 0; i < length; i++) {
+    Serial.print((char)payload[i]);
+  }
+  Serial.println();
+
+  // Switch on the LED if an 1 was received as first character
+  if ((char)payload[0] == '1') {
+    digitalWrite(BUILTIN_LED,
+                 LOW); // Turn the LED on (Note that LOW is the voltage level
+    // but actually the LED is on; this is because
+    // it is active low on the ESP-01)
+  } else {
+    digitalWrite(BUILTIN_LED,
+                 HIGH); // Turn the LED off by making the voltage HIGH
+  }
+}
+
+void reconnect_mqtt() {
+  // Loop until we're reconnected
+  while (!client.connected()) {
+    Serial.print("Attempting MQTT connection...");
+    // Create a random client ID
+    String clientId = "ESP8266Client-";
+    clientId += String(random(0xffff), HEX);
+    // Attempt to connect
+    if (client.connect(clientId.c_str())) {
+      Serial.println("connected");
+      // Once connected, publish an announcement...
+      client.publish("device/temp", "MQTT Server is Connected");
+      // ... and resubscribe
+      client.subscribe("device/led");
+    } else {
+      Serial.print("failed, rc=");
+      Serial.print(client.state());
+      Serial.println(" try again in 5 seconds");
+      // Wait 5 seconds before retrying
+      delay(5000);
+    }
+  }
+}
+
+void createDial() {
+
+  tft.setTextColor(WHITE, GREY);
+  tft.fillCircle(120, 120, 118, BORDEAUX); // creates outer ring
+  tft.fillCircle(120, 120, 110, BLACK);
+
+  for (int i = 0; i < 360; i += 30) // draw 12 line segments at the outer ring
+  {
+    sx = cos((i - 90) * DEG2RAD);
+    sy = sin((i - 90) * DEG2RAD);
+    x0 = sx * 114 + 120;
+    yy0 = sy * 114 + 120;
+    x1 = sx * 100 + 120;
+    yy1 = sy * 100 + 120;
+    tft.drawLine(x0, yy0, x1, yy1, GREEN);
+  }
+
+  for (int i = 0; i < 360; i += 6) // draw 60 dots - minute markers
+  {
+    sx = cos((i - 90) * DEG2RAD);
+    sy = sin((i - 90) * DEG2RAD);
+    x0 = sx * 102 + 120;
+    yy0 = sy * 102 + 120;
+    tft.drawPixel(x0, yy0, WHITE);
+
+    if (i == 0 || i == 180)
+      tft.fillCircle(x0, yy0, 2, WHITE); // draw main quadrant dots
+    if (i == 90 || i == 270)
+      tft.fillCircle(x0, yy0, 2, WHITE);
+  }
+
+  tft.fillCircle(120, 121, 3, WHITE); // pivot
+  targetTime = millis() + 1000;
 }
